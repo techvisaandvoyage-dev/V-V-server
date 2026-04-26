@@ -32,31 +32,10 @@ app.use('/api/users', require('./routes/userRoutes'));
 const { getRazorpayKeyId } = require('./controllers/settingsController');
 app.get('/api/config/razorpay', getRazorpayKeyId);
 
-// ── Serve Static Assets in Production ──────────────────────
-if (process.env.NODE_ENV === 'production') {
-
-  const clientBuildPath = path.join(__dirname, '../client/dist');
-  const adminBuildPath = path.join(__dirname, '../admin/dist');
-
-  // ✅ Serve Admin App
-  app.use('/admin', express.static(adminBuildPath));
-
-  app.get(/^\/admin\/.*$/, (req, res) => {
-    res.sendFile(path.join(adminBuildPath, 'index.html'));
-  });
-
-  // ✅ Serve Client App
-  app.use(express.static(clientBuildPath));
-
-  app.get(/^(?!\/(api|uploads|admin)).*$/, (req, res) => {
-    res.sendFile(path.join(clientBuildPath, 'index.html'));
-  });
-
-} else {
-  app.get('/', (req, res) => {
-    res.send('Visa & Voyage API is running (Development)...');
-  });
-}
+// ✅ Simple test route (IMPORTANT)
+app.get('/', (req, res) => {
+  res.send('API is running...');
+});
 
 // Server start
 const PORT = process.env.PORT || 5000;
@@ -64,7 +43,6 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
 
-  // Auto-seed Admin
   try {
     const Admin = require('./models/Admin');
     const bcrypt = require('bcryptjs');
