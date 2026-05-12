@@ -13,7 +13,7 @@ const transactionSchema = new mongoose.Schema({
   },
   razorpayOrderId: {
     type: String,
-    required: true
+    default: ""
   },
   razorpayPaymentId: {
     type: String
@@ -27,8 +27,12 @@ const transactionSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'success', 'failed'],
+    enum: ['pending', 'success', 'failed', 'cancelled'],
     default: 'pending'
+  },
+  notes: {
+    type: String,
+    default: ""
   }
 }, {
   timestamps: true

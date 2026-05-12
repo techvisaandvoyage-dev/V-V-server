@@ -4,8 +4,17 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-  "start": "node server.js"
-},
+    "start": "node server.js",
+    "seed:countries": "node seedCountries.js",
+    "seed:countries:sync": "node seedCountries.js --sync",
+    "seed:countries:force": "node seedCountries.js --force",
+    "images:countries": "node fetchCountryImages.js",
+    "images:countries:all": "node fetchCountryImages.js --all",
+    "images:countries:missing": "node fetchCountryImages.js --only-missing",
+    "images:pinterest": "node fetchPinterestCountryImages.js",
+    "clear:applications": "node clear_data.js",
+    "generate:country-regions": "node scripts/generateCountryRegionsJson.js"
+  },
   "keywords": [],
   "author": "Yash raj singh",
   "license": "ISC",
@@ -16,6 +25,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "firebase-admin": "^13.9.0",
     "google-auth-library": "^10.6.2",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
