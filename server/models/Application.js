@@ -23,7 +23,12 @@ const applicationSchema = new mongoose.Schema({
   processingDays: { type: Number },
   transactionId: { type: String },
   paymentMethod: { type: String },
-  paymentStatus: { type: String, default: 'completed' },
+  paymentStatus: {
+    type: String,
+    enum: ['pending_payment', 'completed', 'cancelled', 'failed'],
+    default: 'completed'
+  },
+  requiredDocuments: [{ type: String }],
   
   status: {
     type: String,
@@ -34,7 +39,32 @@ const applicationSchema = new mongoose.Schema({
   documents: [{
     type: String // paths to the files in /uploads/documents
   }],
+
+  travellerDocuments: [
+    {
+      travelerNo: { type: Number, required: true },
+      travelerName: { type: String, default: "" },
+      gdriveLink: { type: String, default: "" },
+      documents: { type: Map, of: String, default: {} },
+      otherDocuments: [{ type: String }],
+      uploadedAt: { type: Date, default: Date.now },
+    },
+  ],
+
+  travelerNames: [{ type: String, default: "" }],
+
+  /** Headcount from checkout (service fee multiplier) */
+  travellerCount: { type: Number, default: 1 },
+
+  /** True when user paid from country page but still must fill passport / uploads */
+  detailsPending: { type: Boolean, default: false },
   
+  gdriveLink: { type: String, default: "" },
+
+  visaFilePath: { type: String, default: "" },
+  visaFileName: { type: String, default: "" },
+  visaFileUploadedAt: { type: Date, default: null },
+
   notes: { type: String }
 }, {
   timestamps: true

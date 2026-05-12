@@ -39,13 +39,12 @@ const UserSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    // Required unless it's a Google OAuth user
+    // Not stored when user signs in via Firebase (Google or Email/Password)
     required: function() {
-      return !this.googleId;
+      return !this.googleId && !this.facebookId && !this.firebaseUid;
     },
     validate: {
       validator: function(v) {
-        // If empty (because googleId exists), let it pass
         if (!v) return true;
         // Skip strength validation for already hashed bcrypt strings
         if (typeof v === 'string' && v.startsWith('$2b$')) return true;
@@ -65,6 +64,17 @@ const UserSchema = new mongoose.Schema({
     type: String,
     sparse: true,
     unique: true
+  },
+  facebookId: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
+  firebaseUid: {
+    type: String,
+    sparse: true,
+    unique: true,
+    trim: true
   }
 }, { timestamps: true });
 

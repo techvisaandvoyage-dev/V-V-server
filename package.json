@@ -9,7 +9,12 @@
     "client": "npm run dev --prefix client",
     "admin": "npm run dev --prefix admin",
     "server": "node server/server.js",
-    "dev": "concurrently \"npm run server\" \"npm run client\" \"npm run admin\""
+    "images:pinterest": "npm --prefix server run images:pinterest --",
+    "db:sync-countries": "npm --prefix server run seed:countries:sync",
+    "db:images-unsplash": "npm --prefix server run images:countries",
+    "db:images-unsplash:missing": "npm --prefix server run images:countries:missing",
+    "dev": "concurrently \"npm run server\" \"npm run client\" \"npm run admin\"",
+    "generate:country-regions": "npm run generate:country-regions --prefix server"
   },
   "dependencies": {
     "concurrently": "^8.2.2"
