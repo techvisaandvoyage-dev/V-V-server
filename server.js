@@ -3,16 +3,14 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
-const connectDB = require('./config/db');
 const path = require('path');
+const connectDB = require('./config/db');
 
-// Load env vars
-dotenv.config();
-
-// Connect to database
-connectDB();
+// Load env from server/ so `npm run server` from repo root still finds MONGO_URI, etc.
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
+app.set('trust proxy', 1); // Render / other reverse proxies
 
 // Middleware
 app.use(compression());
@@ -56,34 +54,38 @@ app.get('/', (req, res) => {
   res.send('API is running...');
 });
 
-// Server start
+// Server start (wait for DB so MONGO_URI errors fail before binding the port)
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, async () => {
-  console.log(`Server running on port ${PORT}`);
+(async () => {
+  await connectDB();
 
-  // ── Seed default admin ───────────────────────────────────────
-  try {
-    const Admin = require('./models/Admin');
-    const bcrypt = require('bcryptjs');
+  app.listen(PORT, async () => {
+    console.log(`Server running on port ${PORT}`);
 
-    const adminCount = await Admin.countDocuments();
-    if (adminCount === 0) {
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash('admin123', salt);
-      await Admin.create({ email: 'admin@visa.com', password: hashedPassword });
-      console.log('Default Admin account created: admin@visa.com');
+    // ── Seed default admin ───────────────────────────────────────
+    try {
+      const Admin = require('./models/Admin');
+      const bcrypt = require('bcryptjs');
+
+      const adminCount = await Admin.countDocuments();
+      if (adminCount === 0) {
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash('admin123', salt);
+        await Admin.create({ email: 'admin@visa.com', password: hashedPassword });
+        console.log('Default Admin account created: admin@visa.com');
+      }
+    } catch (err) {
+      console.log('Skipping admin seed');
     }
-  } catch (err) {
-    console.log('Skipping admin seed');
-  }
 
-  // ── Seed countries on first boot + keep list at 195 ───────────
-  try {
-    const { seedCountries, syncMissingCountries } = require('./seedCountries');
-    await seedCountries();
-    await syncMissingCountries();
-  } catch (err) {
-    console.log('Skipping country seed:', err.message);
-  }
-});
+    // ── Seed countries on first boot + keep list at 195 ───────────
+    try {
+      const { seedCountries, syncMissingCountries } = require('./seedCountries');
+      await seedCountries();
+      await syncMissingCountries();
+    } catch (err) {
+      console.log('Skipping country seed:', err.message);
+    }
+  });
+})();
