@@ -39,9 +39,10 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+    # Must match your live API origin (no trailing slash). Set in Render Dashboard if different.
     envVars:
       - key: VITE_API_URL
-        value: https://visa-voyage-api.onrender.com
+        value: https://server-x358.onrender.com
       - key: VITE_ADMIN_APP_ORIGIN
         value: https://visa-voyage-admin.onrender.com
 
@@ -58,4 +59,4 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        value: https://visa-voyage-api.onrender.com
+        value: https://server-x358.onrender.com
