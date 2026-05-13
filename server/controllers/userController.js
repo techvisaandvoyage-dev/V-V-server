@@ -30,7 +30,9 @@ const EMAIL_OTP_CONFIG_HINT =
 const getFirebaseAdminApp = async () => {
   const settings = await Settings.findOne({ singleton: 'global' }).lean();
   const projectId = String(settings?.firebaseProjectId || process.env.FIREBASE_PROJECT_ID || '').trim();
-  const rawServiceAccount = String(settings?.firebaseServiceAccountJson || process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
+  const rawServiceAccount = String(
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON || settings?.firebaseServiceAccountJson || '',
+  ).trim();
   const configSignature = `${projectId}:${rawServiceAccount}`;
   const existingApp = admin.apps.find((app) => app.name === FIREBASE_ADMIN_APP_NAME);
 
