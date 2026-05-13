@@ -1,5 +1,13 @@
 const Settings = require('../models/Settings');
 
+/** Strip secret JSON from admin API; expose whether server env supplies the Admin SDK key. */
+const sanitizeSettingsForAdminResponse = (doc) => {
+  const o = doc?.toObject ? doc.toObject() : { ...doc };
+  delete o.firebaseServiceAccountJson;
+  o.firebaseAdminFromEnv = Boolean(String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim());
+  return o;
+};
+
 const DESTINATION_INCLUDED_FALLBACK = [
   'Application form guidance',
   'Document checklist and validation',
@@ -48,7 +56,7 @@ const getSettings = async (req, res) => {
     if (!settings) {
       settings = await Settings.create({ singleton: 'global' });
     }
-    res.json({ success: true, settings });
+    res.json({ success: true, settings: sanitizeSettingsForAdminResponse(settings) });
   } catch (error) {
     console.error('Error fetching settings:', error);
     res.status(500).json({ success: false, message: 'Server error fetching settings' });
@@ -73,7 +81,6 @@ const updateSettings = async (req, res) => {
       firebaseStorageBucket,
       firebaseMessagingSenderId,
       firebaseAppId,
-      firebaseServiceAccountJson,
       sms91AuthKey,
       sms91TemplateId,
       sms91OtpLength,
@@ -95,7 +102,6 @@ const updateSettings = async (req, res) => {
       googleClientId,
       googleClientSecret: googleClientSecret ? '***' : '',
       firebaseApiKey: firebaseApiKey ? '***' : '',
-      firebaseServiceAccountJson: firebaseServiceAccountJson ? '***' : '',
       sms91AuthKey: sms91AuthKey ? '***' : '',
       sms91TemplateId,
       unsplashAccessKey: unsplashAccessKey ? '***' : '',
@@ -119,7 +125,6 @@ const updateSettings = async (req, res) => {
     if (firebaseStorageBucket !== undefined) settings.firebaseStorageBucket = String(firebaseStorageBucket || '').trim();
     if (firebaseMessagingSenderId !== undefined) settings.firebaseMessagingSenderId = String(firebaseMessagingSenderId || '').trim();
     assignSecretUnlessEmpty(settings, 'firebaseAppId', firebaseAppId);
-    assignSecretUnlessEmpty(settings, 'firebaseServiceAccountJson', firebaseServiceAccountJson);
     assignSecretUnlessEmpty(settings, 'sms91AuthKey', sms91AuthKey);
     assignSecretUnlessEmpty(settings, 'sms91TemplateId', sms91TemplateId);
     if (sms91OtpLength !== undefined) {
@@ -155,7 +160,11 @@ const updateSettings = async (req, res) => {
 
     await settings.save();
     console.log('Settings updated successfully');
-    res.json({ success: true, settings, message: 'Settings updated successfully' });
+    res.json({
+      success: true,
+      settings: sanitizeSettingsForAdminResponse(settings),
+      message: 'Settings updated successfully',
+    });
   } catch (error) {
     console.error('Error updating settings:', error);
     res.status(500).json({ success: false, message: error.message || 'Server error updating settings' });

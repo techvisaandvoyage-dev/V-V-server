@@ -9,8 +9,8 @@ let missingEmailEnvLogged = false;
  * - Normal OTP email: SMTP via smtpEmailUser + smtpEmailPass (or EMAIL_* env).
  * - Hybrids: Admin mailbox + EMAIL_PASS only in .env, or EMAIL_USER in .env + pass saved only in Admin
  *   (avoids "signup worked, login mail didn't" when credentials were split across DB vs env).
- * - Optional "Firebase-linked" path: same service account JSON you use for Firebase Admin
- *   (Admin → Firebase → Service account JSON) + Google Workspace domain-wide delegation:
+ * - Optional "Firebase-linked" path: same service account as Firebase Admin (`FIREBASE_SERVICE_ACCOUNT_JSON` in server/.env)
+ *   + Google Workspace domain-wide delegation:
  *   set "Nodemailer service" to `gmail-oauth`, "SMTP email" to the mailbox to send as,
  *   leave SMTP password empty. (Firebase Auth does not send custom HTML OTP; this uses
  *   Gmail SMTP with OAuth2 + that service account.)
@@ -39,7 +39,7 @@ const getMailConfig = async () => {
     const user = String(s.smtpEmailUser || '').trim();
     const pass = String(s.smtpEmailPass || '').trim();
     const serviceField = String(s.smtpEmailService || process.env.EMAIL_SERVICE || 'gmail').trim() || 'gmail';
-    const saRaw = String(s.firebaseServiceAccountJson || '').trim();
+    const saRaw = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || s.firebaseServiceAccountJson || '').trim();
 
     if (user && pass) {
       return { kind: 'smtp', user, pass, service: normalizeSmtpService(serviceField) };
