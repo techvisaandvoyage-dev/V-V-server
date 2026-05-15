@@ -29,6 +29,8 @@ const {
   getGlobalCountryDefaults,
   updateGlobalVisaType,
   updateGlobalValidity,
+  updateGlobalLengthOfStay,
+  updateGlobalEntryType,
   updateGlobalProcessingDays,
   updateGlobalRequiredDocuments,
   manageCustomDocuments,
@@ -37,6 +39,8 @@ const {
 app.get('/api/admin/control/country-defaults', protect, requireAdmin, getGlobalCountryDefaults);
 app.post('/api/admin/control/visa-type', protect, requireAdmin, updateGlobalVisaType);
 app.post('/api/admin/control/validity', protect, requireAdmin, updateGlobalValidity);
+app.post('/api/admin/control/length-of-stay', protect, requireAdmin, updateGlobalLengthOfStay);
+app.post('/api/admin/control/entry-type', protect, requireAdmin, updateGlobalEntryType);
 app.post('/api/admin/control/processing-days', protect, requireAdmin, updateGlobalProcessingDays);
 app.post('/api/admin/control/required-documents', protect, requireAdmin, updateGlobalRequiredDocuments);
 app.post('/api/admin/control/custom-documents', protect, requireAdmin, manageCustomDocuments);

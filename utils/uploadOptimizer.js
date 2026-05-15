@@ -30,8 +30,38 @@ const uploadOptimizer = multer({
   fileFilter: fileFilter
 });
 
+const { getFirebaseAdminApp } = require('./firebaseAdmin');
+
 /**
- * Middleware to process uploaded files (Sharp for images, direct save for PDFs)
+ * Upload a buffer to Firebase Storage.
+ */
+const uploadToFirebase = async (buffer, filename, mimetype) => {
+  try {
+    const app = await getFirebaseAdminApp();
+    const bucket = app.storage().bucket();
+    
+    if (!bucket.name) {
+      throw new Error('Firebase Storage bucket is not configured. Add it in Admin -> Settings.');
+    }
+
+    const file = bucket.file(`documents/${filename}`);
+    await file.save(buffer, {
+      metadata: { contentType: mimetype },
+    });
+
+    // Make the file public so we can use the direct URL. 
+    // In production, you might want to use signed URLs for better security.
+    await file.makePublic();
+
+    return `https://storage.googleapis.com/${bucket.name}/documents/${filename}`;
+  } catch (error) {
+    console.error('Firebase Upload Error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Middleware to process uploaded files and upload them to Firebase Storage
  */
 const processFiles = async (req, res, next) => {
   if (!req.files || req.files.length === 0) {
@@ -39,31 +69,33 @@ const processFiles = async (req, res, next) => {
   }
 
   try {
-    req.body.documents = []; // We will store final file paths here
+    req.body.documents = [];
 
     await Promise.all(
       req.files.map(async (file) => {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         const extension = path.extname(file.originalname).toLowerCase();
         const filename = `doc-${uniqueSuffix}${extension}`;
-        const filepath = path.join(docsDir, filename);
-
-        // Save original file buffer directly to maintain exact type and size
-        fs.writeFileSync(filepath, file.buffer);
         
-        req.body.documents.push(`/uploads/documents/${filename}`);
+        const firebaseUrl = await uploadToFirebase(file.buffer, filename, file.mimetype);
+        req.body.documents.push(firebaseUrl);
       })
     );
 
     next();
   } catch (error) {
     console.error("Error processing files:", error);
-    res.status(500).json({ success: false, message: "Error processing files during upload" });
+    res.status(500).json({ 
+      success: false, 
+      message: error.message.includes('Firebase') 
+        ? error.message 
+        : "Error uploading documents to cloud storage" 
+    });
   }
 };
 
 /**
- * Save multipart files to disk and attach paths to req.savedDocumentPaths (for appending to an application).
+ * Upload multipart files to Firebase Storage and attach URLs to req.savedDocumentPaths.
  */
 const saveDocumentsToDisk = async (req, res, next) => {
   if (!req.files || req.files.length === 0) {
@@ -77,16 +109,21 @@ const saveDocumentsToDisk = async (req, res, next) => {
         const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
         const extension = path.extname(file.originalname).toLowerCase();
         const filename = `doc-${uniqueSuffix}${extension}`;
-        const filepath = path.join(docsDir, filename);
-        fs.writeFileSync(filepath, file.buffer);
-        paths.push(`/uploads/documents/${filename}`);
+        
+        const firebaseUrl = await uploadToFirebase(file.buffer, filename, file.mimetype);
+        paths.push(firebaseUrl);
       })
     );
     req.savedDocumentPaths = paths;
     next();
   } catch (error) {
     console.error("Error saving documents:", error);
-    res.status(500).json({ success: false, message: "Error saving uploaded files" });
+    res.status(500).json({ 
+      success: false, 
+      message: error.message.includes('Firebase') 
+        ? error.message 
+        : "Error uploading documents to cloud storage" 
+    });
   }
 };
 
@@ -94,4 +131,5 @@ module.exports = {
   uploadOptimizer,
   processFiles,
   saveDocumentsToDisk,
+  uploadToFirebase,
 };

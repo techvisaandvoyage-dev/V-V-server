@@ -98,21 +98,41 @@ const settingsSchema = new mongoose.Schema({
     default: ''
   },
   /** Shown on every destination detail page — "Why book now?" bullets (global default). */
-  destinationWhyBookNow: [{ type: String, trim: true }],
-  /** Shown on every destination detail page — "What's included" bullets (global default). */
-  destinationIncludedItems: [{ type: String, trim: true }],
+  destinationWhyBookNow: {
+    type: [{ type: String, trim: true }],
+    default: []
+  },
+  /** Shown on every destination detail page — "What's included" items (global default). */
+  destinationIncludedItems: {
+    type: [{
+      title: { type: String, trim: true, default: '' },
+      description: { type: String, trim: true, default: '' },
+      icon: { type: String, trim: true, default: '' },
+      color: { type: String, trim: true, default: 'blue' },
+    }],
+    default: []
+  },
   /** Shown on every destination detail page — FAQ list (global default). */
-  destinationFaqs: [{
-    question: { type: String, trim: true, default: '' },
-    answer: { type: String, trim: true, default: '' },
-  }],
+  destinationFaqs: {
+    type: [{
+      question: { type: String, trim: true, default: '' },
+      answer: { type: String, trim: true, default: '' },
+    }],
+    default: []
+  },
   /** Shown on every destination detail page — numbered "How it works" steps (global default). */
-  destinationHowItWorks: [{
-    title: { type: String, trim: true, default: '' },
-    description: { type: String, trim: true, default: '' },
-  }],
+  destinationHowItWorks: {
+    type: [{
+      title: { type: String, trim: true, default: '' },
+      description: { type: String, trim: true, default: '' },
+    }],
+    default: []
+  },
   /** Shown on every destination detail page — generic visa requirement bullets (global default). */
-  destinationVisaRequirements: [{ type: String, trim: true }],
+  destinationVisaRequirements: {
+    type: [{ type: String, trim: true }],
+    default: []
+  },
 
   /**
    * Universal "Visa Type" applied to every country whose `useGlobalVisaType` flag is
@@ -122,6 +142,10 @@ const settingsSchema = new mongoose.Schema({
   globalVisaType: { type: String, default: '', trim: true },
   /** Universal "Validity" applied the same way. */
   globalValidity: { type: String, default: '', trim: true },
+  /** Universal "Length of Stay" applied the same way. */
+  globalLengthOfStay: { type: String, default: '', trim: true },
+  /** Universal "Entry" / entry type applied the same way. */
+  globalEntryType: { type: String, default: '', trim: true },
   /** Universal "Processing Days" (free text e.g. "5-10", "2-3 weeks") applied the same way. */
   globalProcessingDays: { type: String, default: '', trim: true },
 
@@ -130,17 +154,40 @@ const settingsSchema = new mongoose.Schema({
    * `useGlobalRequiredDocuments` flag is true. Stored as an ordered list of
    * doc keys; the labels come from the merged catalog (built-in + custom).
    */
-  globalRequiredDocuments: [{ type: String, trim: true }],
+  globalRequiredDocuments: {
+    type: [{ type: String, trim: true }],
+    default: []
+  },
 
   /**
    * Admin-added document types extending the built-in catalog. Each entry is
    * `{ key, label }`. Keys are auto-prefixed with `custom_` on the server so
    * built-ins can never be accidentally overwritten.
    */
-  customDocuments: [{
-    key: { type: String, trim: true, required: true },
-    label: { type: String, trim: true, required: true },
-  }],
+  customDocuments: {
+    type: [{
+      key: { type: String, trim: true, required: true },
+      label: { type: String, trim: true, required: true },
+      description: { type: String, trim: true, default: '' },
+      icon: { type: String, trim: true, default: '' },
+    }],
+    default: []
+  },
+
+  /**
+   * Per-key overrides for the built-in document catalog. This lets admins
+   * change the public/admin-facing document name, helper description, and icon
+   * without changing the stable key already referenced by countries/apps.
+   */
+  documentCatalogOverrides: {
+    type: [{
+      key: { type: String, trim: true, required: true },
+      label: { type: String, trim: true, default: '' },
+      description: { type: String, trim: true, default: '' },
+      icon: { type: String, trim: true, default: '' },
+    }],
+    default: []
+  },
 
   /**
    * Display toggles — when an admin turns a field off, every public country card and
@@ -150,6 +197,8 @@ const settingsSchema = new mongoose.Schema({
    */
   showVisaType: { type: Boolean, default: true },
   showValidity: { type: Boolean, default: true },
+  showLengthOfStay: { type: Boolean, default: true },
+  showEntryType: { type: Boolean, default: true },
   showProcessingDays: { type: Boolean, default: true },
   showRequiredDocuments: { type: Boolean, default: true },
 }, {

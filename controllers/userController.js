@@ -11,13 +11,7 @@ const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
 
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-const {
-  loadServiceAccountSources,
-  normalizePrivateKeyNewlines,
-} = require('../utils/parseFirebaseServiceAccountJson');
-const FIREBASE_ADMIN_APP_NAME = 'visa-voyage-auth';
-let firebaseAdminConfigSignature = '';
+const { getFirebaseAdminApp } = require('../utils/firebaseAdmin');
 
 const generateToken = (id) => {
   return jwt.sign({ id: String(id), role: 'user' }, process.env.JWT_SECRET, {
@@ -31,43 +25,7 @@ const isPhoneLoginOtpEnabled = () => process.env.ENABLE_PHONE_LOGIN_OTP !== 'fal
 const EMAIL_OTP_CONFIG_HINT =
   'Could not send email. Configure SMTP in Admin → Settings, or set EMAIL_USER and EMAIL_PASS in server/.env (see server/.env.example).';
 
-const getFirebaseAdminApp = async () => {
-  const settings = await Settings.findOne({ singleton: 'global' }).lean();
-  const projectId = String(settings?.firebaseProjectId || process.env.FIREBASE_PROJECT_ID || '').trim();
-  const { parsed: parsedAccount, rawUsed } = loadServiceAccountSources({
-    rawFromDb: settings?.firebaseServiceAccountJson,
-  });
-  const configSignature = `${projectId}:${rawUsed}`;
-  const existingApp = admin.apps.find((app) => app.name === FIREBASE_ADMIN_APP_NAME);
 
-  if (existingApp && firebaseAdminConfigSignature === configSignature) {
-    return existingApp;
-  }
-
-  if (existingApp) {
-    await existingApp.delete();
-  }
-
-  if (parsedAccount && typeof parsedAccount === 'object') {
-    const serviceAccount = normalizePrivateKeyNewlines(parsedAccount);
-
-    firebaseAdminConfigSignature = configSignature;
-    return admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-      projectId: serviceAccount.project_id || projectId,
-    }, FIREBASE_ADMIN_APP_NAME);
-  }
-
-  if (!projectId) {
-    throw new Error('Firebase project ID is not configured');
-  }
-
-  firebaseAdminConfigSignature = configSignature;
-  return admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-    projectId,
-  }, FIREBASE_ADMIN_APP_NAME);
-};
 
 const normalizeFirebaseName = (decodedToken) =>
   String(decodedToken.name || decodedToken.email?.split('@')[0] || 'Google User').trim();
@@ -865,27 +823,20 @@ const uploadProfileImage = async (req, res) => {
 
     // Compress and convert uploaded image to webp
     const filename = `profile-${Date.now()}-${Math.round(Math.random() * 1e9)}.webp`;
-    const outputPath = path.join(profilesDir, filename);
-    await sharp(req.file.buffer)
+    
+    const buffer = await sharp(req.file.buffer)
       .resize({ width: 1200, withoutEnlargement: true })
       .webp({ quality: 80 })
-      .toFile(outputPath);
+      .toBuffer();
 
-    // Delete old profile image if it exists
-    if (user.profileImage) {
-      const normalizedOldImagePath = user.profileImage.replace(/^\/+/, '');
-      const oldPath = path.join(__dirname, '..', normalizedOldImagePath);
-      if (fs.existsSync(oldPath)) {
-        fs.unlinkSync(oldPath);
-      }
-    }
+    const { uploadToFirebase } = require('../utils/uploadOptimizer');
+    const firebaseUrl = await uploadToFirebase(buffer, filename, 'image/webp');
 
     // Save new image path relative to server root
-    const imagePath = `/uploads/profiles/${filename}`;
-    user.profileImage = imagePath;
+    user.profileImage = firebaseUrl;
     await user.save();
 
-    res.json({ success: true, profileImage: imagePath });
+    res.json({ success: true, profileImage: firebaseUrl });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: 'Server error uploading image' });
