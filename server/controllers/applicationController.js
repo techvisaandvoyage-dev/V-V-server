@@ -514,8 +514,13 @@ const uploadApprovedVisaFile = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Application not found' });
     }
 
-    application.visaFilePath = `/uploads/visa-files/${req.file.filename}`;
-    application.visaFileName = req.file.originalname || req.file.filename;
+    const { uploadToFirebase } = require('../utils/uploadOptimizer');
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const filename = `visa-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+    const firebaseUrl = await uploadToFirebase(req.file.buffer, filename, req.file.mimetype);
+
+    application.visaFilePath = firebaseUrl;
+    application.visaFileName = req.file.originalname || filename;
     application.visaFileUploadedAt = new Date();
     if (application.status !== 'approved') {
       application.status = 'approved';

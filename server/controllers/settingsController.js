@@ -1,4 +1,5 @@
 const Settings = require('../models/Settings');
+const { loadSettingsDocument } = require('../utils/settingsDocument');
 
 /** Strip secret JSON from admin API; expose whether server env supplies the Admin SDK key. */
 const sanitizeSettingsForAdminResponse = (doc) => {
@@ -15,9 +16,27 @@ const DESTINATION_WHY_BOOK_NOW_FALLBACK = [
 ];
 
 const DESTINATION_INCLUDED_FALLBACK = [
-  'Application form guidance',
-  'Document checklist and validation',
-  'End-to-end support till submission',
+  {
+    title: 'Application Form Guidance',
+    description:
+      'Step-by-step guidance to fill your visa application form accurately and confidently.',
+    icon: 'ri-file-edit-line',
+    color: 'blue',
+  },
+  {
+    title: 'Document Checklist & Validation',
+    description:
+      'We provide a complete checklist and verify your documents to ensure everything is in order.',
+    icon: 'ri-file-list-3-line',
+    color: 'green',
+  },
+  {
+    title: 'End-to-end Support till Submission',
+    description:
+      'Our experts assist you at every step until your application is successfully submitted.',
+    icon: 'ri-customer-service-2-line',
+    color: 'purple',
+  },
 ];
 
 const DESTINATION_HOW_IT_WORKS_FALLBACK = [
@@ -91,6 +110,71 @@ const assignSecretUnlessEmpty = (doc, path, incoming) => {
   if (next) doc[path] = next;
 };
 
+const sanitizeIncludedItemsList = (arr) =>
+  Array.isArray(arr)
+    ? arr
+        .map((item) => {
+          if (typeof item === 'string') {
+            return {
+              title: item.trim(),
+              description: '',
+              icon: '',
+              color: 'blue',
+            };
+          }
+
+          return {
+            title: String(item?.title ?? '').trim(),
+            description: String(item?.description ?? '').trim(),
+            icon: String(item?.icon ?? '').trim(),
+            color: String(item?.color ?? 'blue').trim() || 'blue',
+          };
+        })
+        .filter((item) => item.title)
+    : [];
+
+const normalizeSettingsUpdatePayload = (body = {}) => ({
+  ...body,
+  destinationWhyBookNow:
+    body.destinationWhyBookNow === undefined
+      ? undefined
+      : Array.isArray(body.destinationWhyBookNow)
+        ? body.destinationWhyBookNow.map((item) => String(item ?? '').trim()).filter(Boolean)
+        : [],
+  destinationIncludedItems:
+    body.destinationIncludedItems === undefined
+      ? []
+      : sanitizeIncludedItemsList(body.destinationIncludedItems),
+  destinationFaqs:
+    body.destinationFaqs === undefined
+      ? undefined
+      : Array.isArray(body.destinationFaqs)
+        ? body.destinationFaqs
+            .map((item) => ({
+              question: String(item?.question ?? '').trim(),
+              answer: String(item?.answer ?? '').trim(),
+            }))
+            .filter((item) => item.question && item.answer)
+        : [],
+  destinationHowItWorks:
+    body.destinationHowItWorks === undefined
+      ? undefined
+      : Array.isArray(body.destinationHowItWorks)
+        ? body.destinationHowItWorks
+            .map((item) => ({
+              title: String(item?.title ?? '').trim(),
+              description: String(item?.description ?? '').trim(),
+            }))
+            .filter((item) => item.title && item.description)
+        : [],
+  destinationVisaRequirements:
+    body.destinationVisaRequirements === undefined
+      ? undefined
+      : Array.isArray(body.destinationVisaRequirements)
+        ? body.destinationVisaRequirements.map((item) => String(item ?? '').trim()).filter(Boolean)
+        : [],
+});
+
 /**
  * @route   GET /api/admin/settings
  * @desc    Get global settings (Admin only)
@@ -98,10 +182,7 @@ const assignSecretUnlessEmpty = (doc, path, incoming) => {
  */
 const getSettings = async (req, res) => {
   try {
-    let settings = await Settings.findOne({ singleton: 'global' });
-    if (!settings) {
-      settings = await Settings.create({ singleton: 'global' });
-    }
+    const settings = await loadSettingsDocument();
     res.json({ success: true, settings: sanitizeSettingsForAdminResponse(settings) });
   } catch (error) {
     console.error('Error fetching settings:', error);
@@ -116,6 +197,7 @@ const getSettings = async (req, res) => {
  */
 const updateSettings = async (req, res) => {
   try {
+    const safePayload = normalizeSettingsUpdatePayload(req.body);
     const {
       razorpayKeyId,
       razorpayKeySecret,
@@ -143,7 +225,7 @@ const updateSettings = async (req, res) => {
       destinationFaqs,
       destinationHowItWorks,
       destinationVisaRequirements,
-    } = req.body;
+    } = safePayload;
     console.log('Admin updating settings:', {
       razorpayKeyId,
       razorpayKeySecret: razorpayKeySecret ? '***' : '',
@@ -158,11 +240,7 @@ const updateSettings = async (req, res) => {
       unsplashApplicationId: unsplashApplicationId || ''
     });
     
-    let settings = await Settings.findOne({ singleton: 'global' });
-    if (!settings) {
-      console.log('Creating global settings singleton...');
-      settings = await Settings.create({ singleton: 'global' });
-    }
+    const settings = await loadSettingsDocument();
     
     if (razorpayKeyId !== undefined) settings.razorpayKeyId = String(razorpayKeyId || '').trim();
     assignSecretUnlessEmpty(settings, 'razorpayKeySecret', razorpayKeySecret);
@@ -197,9 +275,7 @@ const updateSettings = async (req, res) => {
         : [];
     }
     if (destinationIncludedItems !== undefined) {
-      settings.destinationIncludedItems = Array.isArray(destinationIncludedItems)
-        ? destinationIncludedItems.map((s) => String(s ?? '').trim()).filter(Boolean)
-        : [];
+      settings.destinationIncludedItems = sanitizeIncludedItemsList(destinationIncludedItems);
     }
     if (destinationFaqs !== undefined) {
       settings.destinationFaqs = Array.isArray(destinationFaqs)
@@ -247,7 +323,7 @@ const updateSettings = async (req, res) => {
  */
 const getRazorpayKeyId = async (req, res) => {
   try {
-    const settings = await Settings.findOne({ singleton: 'global' });
+    const settings = await loadSettingsDocument();
     const keyIdFromSettings = String(settings?.razorpayKeyId || '').trim();
     const keyIdFromEnv = String(process.env.RAZORPAY_KEY_ID || '').trim();
     const keyId = keyIdFromSettings || keyIdFromEnv;
@@ -269,7 +345,7 @@ const getRazorpayKeyId = async (req, res) => {
  */
 const getFirebaseConfig = async (req, res) => {
   try {
-    const settings = await Settings.findOne({ singleton: 'global' });
+    const settings = await loadSettingsDocument();
     const config = {
       apiKey: String(settings?.firebaseApiKey || process.env.FIREBASE_API_KEY || '').trim(),
       authDomain: String(settings?.firebaseAuthDomain || process.env.FIREBASE_AUTH_DOMAIN || '').trim(),
@@ -298,7 +374,7 @@ const getFirebaseConfig = async (req, res) => {
  */
 const getUploadSettings = async (req, res) => {
   try {
-    const settings = await Settings.findOne({ singleton: 'global' });
+    const settings = await loadSettingsDocument();
     const config = {
       enableGDriveUpload: settings?.enableGDriveUpload !== false,
       enableFileUpload: settings?.enableFileUpload !== false,
@@ -318,7 +394,7 @@ const getUploadSettings = async (req, res) => {
  */
 const getDestinationPageContent = async (req, res) => {
   try {
-    const settings = await Settings.findOne({ singleton: 'global' });
+    const settings = await loadSettingsDocument();
     const rawWhy = settings?.destinationWhyBookNow;
     const whyBookNow =
       Array.isArray(rawWhy) && rawWhy.length
@@ -327,7 +403,7 @@ const getDestinationPageContent = async (req, res) => {
     const rawInc = settings?.destinationIncludedItems;
     const included =
       Array.isArray(rawInc) && rawInc.length
-        ? rawInc.map((s) => String(s ?? '').trim()).filter(Boolean)
+        ? sanitizeIncludedItemsList(rawInc)
         : DESTINATION_INCLUDED_FALLBACK;
     const rawFaqs = settings?.destinationFaqs;
     const faqs =

@@ -22,8 +22,8 @@ const SLUG_IMAGE_HINTS = {
   mexico: ['Chichen Itza Mexico pyramid', 'Mexico City Zocalo', 'Cancun turquoise beach Mexico'],
   canada: ['Banff Lake Louise Canada', 'CN Tower Toronto Canada', 'Old Quebec city Canada'],
   australia: ['Sydney Opera House Australia', 'Harbour Bridge Sydney', 'Uluru Australia'],
-  singapore: ['Marina Bay Sands Singapore', 'Gardens by the Bay Singapore', 'Merlion Singapore'],
-  'south-korea': ['Gyeongbokgung Palace Seoul Korea', 'N Seoul Tower', 'Bukchon Hanok Village Seoul'],
+  singapore: ['Marina Bay Sands Singapore night', 'Gardens by the Bay Singapore', 'Merlion Singapore', 'Singapore skyline vibrant'],
+  'south-korea': ['Gyeongbokgung Palace Seoul Korea', 'N Seoul Tower night', 'Bukchon Hanok Village Seoul'],
   vietnam: ['Ha Long Bay Vietnam', 'Hoi An ancient town Vietnam', 'Ho Chi Minh City skyline Vietnam'],
   indonesia: ['Borobudur Temple Indonesia', 'Bali rice terraces Indonesia', 'Prambanan Yogyakarta'],
   malaysia: ['Petronas Towers Kuala Lumpur', 'George Town Penang Malaysia', 'Malacca historic Malaysia'],
@@ -31,21 +31,16 @@ const SLUG_IMAGE_HINTS = {
   russia: ['Saint Basil Cathedral Moscow', 'Hermitage Saint Petersburg Russia', 'Red Square Moscow'],
   portugal: ['Belem Tower Lisbon Portugal', 'Porto Ribeira Portugal', 'Pena Palace Sintra Portugal'],
   netherlands: ['Amsterdam canals Netherlands', 'Kinderdijk windmills Netherlands', 'Rotterdam cube houses'],
-  switzerland: ['Matterhorn Zermatt Switzerland', 'Lake Geneva Switzerland', 'Lucerne Chapel Bridge Switzerland'],
-  austria: ['Schonbrunn Palace Vienna Austria', 'Hallstatt Austria village', 'Salzburg Austria old town'],
-  belgium: ['Grand Place Brussels Belgium', 'Bruges canal Belgium', 'Atomium Brussels'],
-  poland: ['Old Town Warsaw Poland', 'Wawel Castle Krakow Poland', 'Gdansk Poland'],
-  ireland: ['Cliffs of Moher Ireland', 'Dublin Temple Bar Ireland', 'Giants Causeway Ireland'],
-  hungary: ['Hungarian Parliament Budapest', 'Fishermans Bastion Budapest Hungary'],
-  czechia: ['Charles Bridge Prague Czechia', 'Prague Castle Czech Republic', 'Old Town Square Prague'],
-  croatia: ['Dubrovnik old town Croatia', 'Plitvice Lakes Croatia', 'Hvar Croatia'],
-  iceland: ['Jokulsarlon glacier lagoon Iceland', 'Blue Lagoon Iceland', 'Reykjavik Hallgrimskirkja'],
-  norway: ['Geirangerfjord Norway', 'Bryggen Bergen Norway', 'Northern lights Norway Tromso'],
-  sweden: ['Stockholm Gamla Stan Sweden', 'Icehotel Sweden', 'Gothenburg canal Sweden'],
-  finland: ['Helsinki Cathedral Finland', 'Lapland Finland northern lights', 'Turku Finland'],
-  denmark: ['Nyhavn Copenhagen Denmark', 'Little Mermaid statue Copenhagen', 'Tivoli Gardens Copenhagen'],
-  'new-zealand': ['Milford Sound New Zealand', 'Lake Tekapo New Zealand', 'Sky Tower Auckland'],
-  argentina: ['Iguazu Falls Argentina', 'Buenos Aires Obelisk Argentina', 'Perito Moreno Glacier Argentina'],
+  iceland: ['Skogafoss waterfall Iceland', 'Diamond Beach Iceland', 'Kirkjufell mountain Iceland'],
+  norway: ['Lofoten Islands Norway', 'Geirangerfjord Norway', 'Preikestolen Pulpit Rock Norway'],
+  switzerland: ['Zermatt Matterhorn Switzerland', 'Lauterbrunnen valley Switzerland', 'Interlaken Switzerland'],
+  austria: ['Hallstatt Austria lake village', 'Salzburg Old Town Austria', 'Vienna Belvedere Palace'],
+  belgium: ['Bruges canal Belgium', 'Grand Place Brussels night', 'Ghent canals Belgium'],
+  poland: ['Krakow Main Market Square Poland', 'Warsaw Old Town Market Place', 'Tatra Mountains Poland'],
+  ireland: ['Cliffs of Moher Ireland sunset', 'Ring of Kerry Ireland', 'Trinity College Library Dublin'],
+  denmark: ['Nyhavn Copenhagen Denmark vibrant', 'Frederiksborg Castle Denmark'],
+  'new-zealand': ['Milford Sound New Zealand waterfall', 'Hobbiton Movie Set New Zealand', 'Lake Pukaki New Zealand'],
+  argentina: ['Perito Moreno Glacier Argentina', 'Iguazu Falls Argentina', 'Patagonia Argentina Fitz Roy'],
   chile: ['Torres del Paine Chile', 'Valparaiso colorful houses Chile', 'Atacama Desert Chile'],
   peru: ['Machu Picchu Peru', 'Cusco Peru Plaza de Armas', 'Rainbow Mountain Peru'],
   colombia: ['Cartagena old city Colombia', 'Cocora Valley Colombia wax palms', 'Bogota Monserrate'],
@@ -119,20 +114,20 @@ const SLUG_IMAGE_HINTS = {
 /** Same as typing in the Unsplash search bar — tried first for natural, beautiful country results. */
 function websiteStyleNameQueries(name) {
   return [
-    name,
-    `${name} travel`,
-    `${name} beautiful`,
-    `${name} photography`,
+    `${name} beautiful tourism landscape`,
+    `${name} iconic famous landmark`,
+    `${name} vibrant travel photography`,
+    `${name} tourism`,
   ];
 }
 
 /** Short landmark-oriented fallbacks after name + slug hints. */
 function landmarkFallbackQueries(name) {
   return [
-    `${name} famous landmark`,
-    `${name} iconic places`,
-    `${name} UNESCO world heritage`,
-    `${name} capital city`,
+    `${name} majestic landscape photography`,
+    `${name} cinematic travel shots`,
+    `${name} stunning nature scenery`,
+    `${name} luxury travel destination`,
   ];
 }
 

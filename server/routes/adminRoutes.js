@@ -35,27 +35,9 @@ if (!fs.existsSync(pageMediaDir)) fs.mkdirSync(pageMediaDir, { recursive: true }
 const visaFilesDir = path.join(__dirname, '..', 'uploads', 'visa-files');
 if (!fs.existsSync(visaFilesDir)) fs.mkdirSync(visaFilesDir, { recursive: true });
 
-const countryImageStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, countryImagesDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `country-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
-  },
-});
-const pageMediaStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, pageMediaDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `page-media-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
-  },
-});
-const visaFileStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, visaFilesDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `visa-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
-  },
-});
+const countryImageStorage = multer.memoryStorage();
+const pageMediaStorage = multer.memoryStorage();
+const visaFileStorage = multer.memoryStorage();
 const countryImageUpload = multer({
   storage: countryImageStorage,
   limits: { fileSize: 5 * 1024 * 1024 },

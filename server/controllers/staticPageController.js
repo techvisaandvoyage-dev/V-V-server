@@ -218,13 +218,22 @@ const toggleStaticPageStatus = async (req, res) => {
   }
 };
 
-const uploadStaticPageImage = (req, res) => {
+const uploadStaticPageImage = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'No image file provided.' });
   }
 
-  const url = `/uploads/page-media/${req.file.filename}`;
-  res.json({ success: true, url });
+  try {
+    const { uploadToFirebase } = require('../utils/uploadOptimizer');
+    const path = require('path');
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const filename = `page-media-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+    const firebaseUrl = await uploadToFirebase(req.file.buffer, filename, req.file.mimetype);
+    res.json({ success: true, url: firebaseUrl });
+  } catch (error) {
+    console.error('uploadStaticPageImage error:', error);
+    res.status(500).json({ success: false, message: error.message || 'Error uploading image to cloud storage' });
+  }
 };
 
 const getPublicPageBySlug = async (req, res) => {
