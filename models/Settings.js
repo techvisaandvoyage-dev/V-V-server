@@ -234,6 +234,7 @@ const settingsSchema = new mongoose.Schema({
       label: { type: String, trim: true, default: '' },
       description: { type: String, trim: true, default: '' },
       icon: { type: String, trim: true, default: '' },
+      deleted: { type: Boolean, default: false },
     }],
     default: []
   },

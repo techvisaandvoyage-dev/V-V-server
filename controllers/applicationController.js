@@ -1,3 +1,4 @@
+const path = require('path');
 const Application = require('../models/Application');
 const Counter = require('../models/Counter');
 const Country = require('../models/Country');
@@ -81,13 +82,20 @@ const appendApplicantNotes = (existingValue, incomingValue) => {
 
 const resolveCheckoutPricing = async (countryId, travelerCount = 1) => {
   const country = await Country.findOne({ slug: String(countryId) }).select(
-    'requiredDocuments basePrice useGlobalBasePrice useGlobalGst gstEnabled gstRate'
+    'requiredDocuments useGlobalRequiredDocuments basePrice useGlobalBasePrice useGlobalGst gstEnabled gstRate'
   );
   const settings = await loadSettingsDocument();
-  const requiredDocuments =
-    Array.isArray(country?.requiredDocuments) && country.requiredDocuments.length
-      ? country.requiredDocuments
-      : ['passport'];
+  
+  const useGlobalRequiredDocuments = country?.useGlobalRequiredDocuments !== false;
+  const globalRequiredDocuments = Array.isArray(settings?.globalRequiredDocuments)
+    ? settings.globalRequiredDocuments.map((k) => String(k ?? '').trim()).filter(Boolean)
+    : [];
+    
+  const requiredDocuments = useGlobalRequiredDocuments
+    ? (globalRequiredDocuments.length ? globalRequiredDocuments : ['passport'])
+    : (Array.isArray(country?.requiredDocuments) && country.requiredDocuments.length
+        ? country.requiredDocuments
+        : ['passport']);
 
   const globalBasePrice = Number(settings?.globalBasePrice);
   const countryBasePrice = Number(country?.basePrice);
@@ -155,6 +163,11 @@ const travelerSnapshotHasRequiredFields = (snapshot) => {
 
   return true;
 };
+
+const UNPAID_APPLICATION_STATUSES = new Set(['pending_payment', 'failed', 'cancelled']);
+
+const isReusableUnpaidApplication = (application) =>
+  Boolean(application && UNPAID_APPLICATION_STATUSES.has(String(application.paymentStatus || '').trim()));
 
 const normalizeTravelerSelections = async (
   rawTravelers = [],
@@ -265,11 +278,7 @@ const createCheckoutDraft = async (req, res) => {
         _id: normalizedDraftId,
         user: req.user.id,
       });
-      if (
-        existingDraft &&
-        existingDraft.paymentStatus !== 'pending_payment' &&
-        existingDraft.detailsPending !== true
-      ) {
+      if (!isReusableUnpaidApplication(existingDraft)) {
         existingDraft = null;
       }
     }
@@ -278,7 +287,7 @@ const createCheckoutDraft = async (req, res) => {
       existingDraft = await Application.findOne({
         user: req.user.id,
         countryId: String(countryId),
-        paymentStatus: 'pending_payment',
+        paymentStatus: { $in: Array.from(UNPAID_APPLICATION_STATUSES) },
       }).sort({ createdAt: -1 });
     }
 
@@ -792,6 +801,74 @@ const getApplicationById = async (req, res) => {
   }
 };
 
+const updateApplicationByAdmin = async (req, res) => {
+  try {
+    const application = await Application.findById(req.params.id);
+    if (!application) {
+      return res.status(404).json({ success: false, message: 'Application not found' });
+    }
+
+    const updates = {};
+    const { travelerUpdate } = req.body;
+    if (travelerUpdate) {
+      const {
+        travelerNo,
+        travelerName,
+        gdriveLink: travelerGdriveLink,
+        gdriveFurtherInfoLink,
+        otherDocuments: travelerOtherDocuments,
+        documents: travelerDocuments,
+      } = travelerUpdate;
+
+      if (Number.isFinite(Number(travelerNo))) {
+        const travellers = Array.isArray(application.travellerDocuments)
+          ? [...application.travellerDocuments]
+          : [];
+        const existingIdx = travellers.findIndex(
+          (t) => Number(t.travelerNo) === Number(travelerNo)
+        );
+
+        if (existingIdx >= 0) {
+          if (travelerName !== undefined) travellers[existingIdx].travelerName = travelerName;
+          if (travelerGdriveLink !== undefined) travellers[existingIdx].gdriveLink = travelerGdriveLink;
+          if (gdriveFurtherInfoLink !== undefined) {
+            travellers[existingIdx].gdriveFurtherInfoLink = String(travelerUpdate.gdriveFurtherInfoLink || '').trim();
+          }
+          if (travelerOtherDocuments !== undefined) {
+            travellers[existingIdx].otherDocuments = travelerOtherDocuments;
+          }
+          if (travelerDocuments !== undefined) {
+            travellers[existingIdx].documents = travelerDocuments;
+          }
+        } else {
+          travellers.push({
+            travelerNo: Number(travelerNo),
+            travelerName: travelerName || '',
+            gdriveLink: travelerGdriveLink || '',
+            gdriveFurtherInfoLink: String(travelerUpdate.gdriveFurtherInfoLink || '').trim(),
+            otherDocuments: travelerOtherDocuments || [],
+            documents: travelerDocuments || {},
+          });
+        }
+
+        updates.travellerDocuments = travellers.sort((a, b) => a.travelerNo - b.travelerNo);
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ success: false, message: 'Nothing to update.' });
+    }
+
+    const updated = await Application.findByIdAndUpdate(req.params.id, updates, {
+      returnDocument: 'after',
+    });
+    res.json({ success: true, application: updated });
+  } catch (error) {
+    console.error('updateApplicationByAdmin:', error);
+    res.status(500).json({ success: false, message: 'Server error updating application' });
+  }
+};
+
 /**
  * @route   POST /api/admin/applications/:id/visa-file
  * @desc    Upload approved visa file for an application
@@ -811,7 +888,9 @@ const uploadApprovedVisaFile = async (req, res) => {
     const { uploadToFirebase } = require('../utils/uploadOptimizer');
     const ext = path.extname(req.file.originalname).toLowerCase();
     const filename = `visa-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
-    const firebaseUrl = await uploadToFirebase(req.file.buffer, filename, req.file.mimetype);
+    const firebaseUrl = await uploadToFirebase(req.file.buffer, filename, req.file.mimetype, {
+      allowLocalFallback: true,
+    });
 
     application.visaFilePath = firebaseUrl;
     application.visaFileName = req.file.originalname || filename;
@@ -861,6 +940,7 @@ module.exports = {
   getUserApplications,
   getAllApplications,
   getApplicationById,
+  updateApplicationByAdmin,
   uploadApprovedVisaFile,
   updateApplicationStatus
 };  

@@ -170,7 +170,7 @@ const customDocumentKey = (label) => {
  * `[{ key, label, builtIn }]` array the client can use to render labels for
  * any document key the server might return.
  */
-const buildDocumentCatalog = (settings) => {
+const buildDocumentCatalog = (settings, includeDeleted = false) => {
   const overridesByKey = new Map(
     (Array.isArray(settings?.documentCatalogOverrides) ? settings.documentCatalogOverrides : [])
       .map((doc) => ({
@@ -178,30 +178,42 @@ const buildDocumentCatalog = (settings) => {
         label: String(doc?.label ?? '').trim(),
         description: String(doc?.description ?? '').trim(),
         icon: sanitizeRemixIconClass(doc?.icon),
+        deleted: !!doc?.deleted,
       }))
       .filter((doc) => doc.key)
       .map((doc) => [doc.key, doc])
   );
   const customs = Array.isArray(settings?.customDocuments) ? settings.customDocuments : [];
   const customDocs = customs
-    .map((doc) => ({
-      key: String(doc?.key ?? '').trim(),
-      label: String(doc?.label ?? '').trim(),
-      description: String(doc?.description ?? '').trim(),
-      icon: sanitizeRemixIconClass(doc?.icon),
-    }))
-    .filter((d) => d.key && d.label)
+    .map((doc) => {
+      const override = overridesByKey.get(doc.key);
+      return {
+        key: String(doc?.key ?? '').trim(),
+        label: override?.label || String(doc?.label ?? '').trim(),
+        description: override?.description || String(doc?.description ?? '').trim(),
+        icon: override?.icon || sanitizeRemixIconClass(doc?.icon),
+        deleted: !!override?.deleted,
+      };
+    })
+    .filter((d) => d.key && d.label && (includeDeleted || !d.deleted))
     .map((d) => ({ ...d, builtIn: false }));
-  const builtIns = BUILT_IN_DOCUMENT_CATALOG.map((d) => {
-    const override = overridesByKey.get(d.key);
-    return {
-      ...d,
-      label: override?.label || d.label,
-      description: override?.description || d.description || '',
-      icon: override?.icon || '',
-      builtIn: true,
-    };
-  });
+
+  const builtIns = BUILT_IN_DOCUMENT_CATALOG
+    .filter((d) => {
+      const override = overridesByKey.get(d.key);
+      return includeDeleted || !override?.deleted;
+    })
+    .map((d) => {
+      const override = overridesByKey.get(d.key);
+      return {
+        ...d,
+        label: override?.label || d.label,
+        description: override?.description || d.description || '',
+        icon: override?.icon || '',
+        deleted: !!override?.deleted,
+        builtIn: true,
+      };
+    });
   // Deduplicate — admin should never be able to shadow a built-in, but be defensive.
   const seen = new Set();
   const merged = [];
@@ -911,7 +923,7 @@ const getGlobalCountryDefaults = async (req, res) => {
         globalRequiredDocuments,
       },
       display: resolveDisplayToggles(settings),
-      documentCatalog: buildDocumentCatalog(settings),
+      documentCatalog: buildDocumentCatalog(settings, true),
       stats: {
         totalCountries,
         usingGlobalBasePrice,
@@ -1230,15 +1242,14 @@ const updateGlobalRequiredDocuments = async (req, res) => {
   }
   try {
     const settings = await getOrCreateSettings();
-    const customKeys = new Set(
-      (settings?.customDocuments || []).map((d) => String(d?.key ?? '').trim()).filter(Boolean)
-    );
+    const activeCatalog = buildDocumentCatalog(settings);
+    const activeKeys = new Set(activeCatalog.map((d) => d.key));
     const cleaned = [];
     const seen = new Set();
     for (const raw of incoming) {
       const key = String(raw ?? '').trim();
       if (!key || seen.has(key)) continue;
-      if (!BUILT_IN_DOCUMENT_KEYS.has(key) && !customKeys.has(key)) continue;
+      if (!activeKeys.has(key)) continue;
       seen.add(key);
       cleaned.push(key);
     }
@@ -1285,14 +1296,68 @@ const updateGlobalRequiredDocuments = async (req, res) => {
  */
 const manageCustomDocuments = async (req, res) => {
   const action = String(req.body?.action ?? '').toLowerCase();
-  if (!['add', 'save', 'remove'].includes(action)) {
+  if (!['add', 'save', 'remove', 'update-visibility'].includes(action)) {
     return res.status(400).json({
       success: false,
-      message: 'action must be one of "add", "save", or "remove".',
+      message: 'action must be one of "add", "save", "remove", or "update-visibility".',
     });
   }
   try {
     const settings = await getOrCreateSettings();
+    if (action === 'update-visibility') {
+      const activeKeys = Array.isArray(req.body?.activeKeys)
+        ? req.body.activeKeys.map((k) => String(k ?? '').trim()).filter(Boolean)
+        : [];
+
+      const allPossibleKeys = new Set([
+        ...BUILT_IN_DOCUMENT_KEYS,
+        ...(settings.customDocuments || []).map((d) => d.key)
+      ]);
+
+      const nextOverrides = Array.isArray(settings.documentCatalogOverrides)
+        ? [...settings.documentCatalogOverrides]
+        : [];
+
+      for (const key of allPossibleKeys) {
+        const isActive = activeKeys.includes(key);
+        const idx = nextOverrides.findIndex((d) => String(d?.key ?? '').trim() === key);
+
+        if (isActive) {
+          if (idx >= 0) {
+            nextOverrides[idx].deleted = false;
+          } else {
+            nextOverrides.push({ key, deleted: false });
+          }
+        } else {
+          if (idx >= 0) {
+            nextOverrides[idx].deleted = true;
+          } else {
+            nextOverrides.push({ key, deleted: true });
+          }
+          settings.globalRequiredDocuments = (settings.globalRequiredDocuments || []).filter(
+            (k) => String(k ?? '').trim() !== key
+          );
+        }
+      }
+
+      settings.documentCatalogOverrides = nextOverrides;
+      settings.markModified('documentCatalogOverrides');
+      await settings.save();
+
+      const inactiveKeys = [...allPossibleKeys].filter((k) => !activeKeys.includes(k));
+      if (inactiveKeys.length > 0) {
+        await Country.updateMany({}, { $pull: { requiredDocuments: { $in: inactiveKeys } } });
+      }
+
+      console.log('[control] manageCustomDocuments update-visibility:', { activeCount: activeKeys.length });
+      return res.json({
+        success: true,
+        customDocuments: settings.customDocuments,
+        documentCatalog: buildDocumentCatalog(settings, true),
+        message: 'Document catalog visibility updated successfully.',
+      });
+    }
+
     if (action === 'add') {
       const label = String(req.body?.label ?? '').trim();
       const description = String(req.body?.description ?? '').trim();
@@ -1308,6 +1373,22 @@ const manageCustomDocuments = async (req, res) => {
         });
       }
       if (BUILT_IN_DOCUMENT_KEYS.has(key)) {
+        const nextOverrides = Array.isArray(settings.documentCatalogOverrides)
+          ? [...settings.documentCatalogOverrides]
+          : [];
+        const idx = nextOverrides.findIndex((d) => String(d?.key ?? '').trim() === key);
+        if (idx >= 0 && nextOverrides[idx].deleted) {
+          nextOverrides[idx] = { key, label, description, icon, deleted: false };
+          settings.documentCatalogOverrides = nextOverrides;
+          settings.markModified('documentCatalogOverrides');
+          await settings.save();
+          return res.json({
+            success: true,
+            customDocuments: settings.customDocuments,
+            documentCatalog: buildDocumentCatalog(settings, true),
+            message: `"${label}" (built-in document) has been restored.`,
+          });
+        }
         return res.status(409).json({
           success: false,
           message: 'A built-in document already uses that label — choose another.',
@@ -1328,7 +1409,7 @@ const manageCustomDocuments = async (req, res) => {
       return res.json({
         success: true,
         customDocuments: settings.customDocuments,
-        documentCatalog: buildDocumentCatalog(settings),
+        documentCatalog: buildDocumentCatalog(settings, true),
         message: `"${label}" added to the document catalog.`,
       });
     }
@@ -1354,6 +1435,7 @@ const manageCustomDocuments = async (req, res) => {
         if (idx >= 0) nextOverrides[idx] = payload;
         else nextOverrides.push(payload);
         settings.documentCatalogOverrides = nextOverrides;
+        settings.markModified('documentCatalogOverrides');
       } else {
         const nextCustoms = Array.isArray(settings.customDocuments) ? [...settings.customDocuments] : [];
         const idx = nextCustoms.findIndex((d) => String(d?.key ?? '').trim() === key);
@@ -1369,7 +1451,7 @@ const manageCustomDocuments = async (req, res) => {
       return res.json({
         success: true,
         customDocuments: settings.customDocuments,
-        documentCatalog: buildDocumentCatalog(settings),
+        documentCatalog: buildDocumentCatalog(settings, true),
         message: `"${label}" saved.`,
       });
     }
@@ -1380,15 +1462,20 @@ const manageCustomDocuments = async (req, res) => {
       return res.status(400).json({ success: false, message: 'key is required for remove.' });
     }
     if (BUILT_IN_DOCUMENT_KEYS.has(key)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Built-in document types cannot be removed.',
-      });
+      const nextOverrides = Array.isArray(settings.documentCatalogOverrides)
+        ? [...settings.documentCatalogOverrides]
+        : [];
+      const idx = nextOverrides.findIndex((d) => String(d?.key ?? '').trim() === key);
+      const payload = { key, deleted: true };
+      if (idx >= 0) nextOverrides[idx] = payload;
+      else nextOverrides.push(payload);
+      settings.documentCatalogOverrides = nextOverrides;
+      settings.markModified('documentCatalogOverrides');
+    } else {
+      settings.customDocuments = (settings.customDocuments || []).filter(
+        (d) => String(d.key ?? '').trim() !== key
+      );
     }
-    const before = (settings.customDocuments || []).length;
-    settings.customDocuments = (settings.customDocuments || []).filter(
-      (d) => String(d.key ?? '').trim() !== key
-    );
     settings.globalRequiredDocuments = (settings.globalRequiredDocuments || []).filter(
       (k) => String(k ?? '').trim() !== key
     );
@@ -1396,15 +1483,12 @@ const manageCustomDocuments = async (req, res) => {
     // Strip the deleted key from every per-country requiredDocuments override so
     // applicants don't see stale entries referring to a doc that no longer exists.
     await Country.updateMany({}, { $pull: { requiredDocuments: key } });
-    console.log('[control] manageCustomDocuments remove:', {
-      key,
-      removedCustom: before - settings.customDocuments.length,
-    });
+    console.log('[control] manageCustomDocuments remove:', { key });
     return res.json({
       success: true,
       customDocuments: settings.customDocuments,
-      documentCatalog: buildDocumentCatalog(settings),
-      message: 'Custom document removed from the catalog and every country.',
+      documentCatalog: buildDocumentCatalog(settings, true),
+      message: 'Document removed from the catalog and every country.',
     });
   } catch (err) {
     console.error('[control] manageCustomDocuments error:', err);
