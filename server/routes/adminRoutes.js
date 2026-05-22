@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { loginAdmin, changePassword } = require('../controllers/adminController');
-const { getAllApplications, getApplicationById, updateApplicationStatus, uploadApprovedVisaFile } = require('../controllers/applicationController');
+const { getAllApplications, getApplicationById, updateApplicationByAdmin, updateApplicationStatus, uploadApprovedVisaFile } = require('../controllers/applicationController');
 const { getSettings, updateSettings } = require('../controllers/settingsController');
 const { getAllTransactions } = require('../controllers/paymentController');
 const {
@@ -75,6 +75,7 @@ router.put('/change-password', protect, requireAdmin, changePassword);
 
 router.get('/applications', protect, requireAdmin, getAllApplications);
 router.get('/applications/:id', protect, requireAdmin, getApplicationById);
+router.put('/applications/:id', protect, requireAdmin, updateApplicationByAdmin);
 router.post('/applications/:id/visa-file', protect, requireAdmin, visaFileUpload.single('visaFile'), uploadApprovedVisaFile);
 router.put('/applications/:id/status', protect, requireAdmin, updateApplicationStatus);
 
