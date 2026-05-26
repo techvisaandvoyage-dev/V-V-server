@@ -54,6 +54,7 @@ app.post('/api/admin/control/display-toggles', protect, requireAdmin, updateCoun
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/travelers', require('./routes/travelerRoutes'));
+app.use('/api/visa-types', require('./routes/visaTypeRoutes'));
 
 // Public Config Routes
 const {
