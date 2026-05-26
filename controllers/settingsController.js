@@ -217,6 +217,12 @@ const normalizeSettingsUpdatePayload = (body = {}) => ({
     body.landingHeroHighlights === undefined
       ? undefined
       : sanitizeLandingHeroHighlights(body.landingHeroHighlights),
+  allowedFileFormats:
+    body.allowedFileFormats === undefined
+      ? undefined
+      : Array.isArray(body.allowedFileFormats)
+        ? body.allowedFileFormats.map((s) => String(s || "").toLowerCase().trim()).filter(Boolean)
+        : ["pdf", "jpg", "jpeg", "png"],
 });
 
 /**
