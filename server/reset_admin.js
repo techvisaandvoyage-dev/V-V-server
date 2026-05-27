@@ -22,7 +22,7 @@ const resetAdmin = async () => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash('admin123', salt);
     const newAdmin = await Admin.create({
-      email: 'admin@visa.com',
+      email: 'tech.visaandvoyage@gmail.com',
       password: hashedPassword
     });
 
