@@ -12,11 +12,40 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const app = express();
 app.set('trust proxy', 1); // Render / other reverse proxies
 
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://visavo.in',
+  'https://www.visavo.in',
+  'https://admin.visavo.in',
+  'https://www.admin.visavo.in',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5177',
+  'http://localhost:3000',
+];
+
+const allowedOrigins = new Set([
+  ...DEFAULT_ALLOWED_ORIGINS,
+  ...String(process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+]);
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error(`CORS blocked origin: ${origin}`));
+  },
+};
+
 // Middleware
 app.use(compression());
 app.use(helmet());
 app.use(helmet.crossOriginResourcePolicy({ policy: "cross-origin" }));
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Static uploads
