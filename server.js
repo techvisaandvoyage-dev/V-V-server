@@ -495,8 +495,8 @@ const PORT = process.env.PORT || 5000;
       if (adminCount === 0) {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash('admin123', salt);
-        await Admin.create({ email: 'admin@visa.com', password: hashedPassword });
-        console.log('Default Admin account created: admin@visa.com');
+        await Admin.create({ email: 'tech.visaandvoyage@gmail.com', password: hashedPassword });
+        console.log('Default Admin account created: tech.visaandvoyage@gmail.com');
       }
     } catch (err) {
       console.log('Skipping admin seed');
