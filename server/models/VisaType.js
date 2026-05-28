@@ -10,7 +10,15 @@ const visaTypeSchema = new mongoose.Schema({
   active: { 
     type: Boolean, 
     default: true 
-  }
+  },
+  applyToAllActiveCountries: {
+    type: Boolean,
+    default: true,
+  },
+  selectedCountries: [{
+    type: String,
+    trim: true,
+  }],
 }, { timestamps: true });
 
 module.exports = mongoose.model('VisaType', visaTypeSchema);

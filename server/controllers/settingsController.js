@@ -114,6 +114,12 @@ const LANDING_HERO_HIGHLIGHTS_FALLBACK = [
   },
 ];
 
+const withDefaultVisibility = (item) => ({
+  ...item,
+  showInAllActiveCountries: item?.showInAllActiveCountries !== false,
+  selectedCountries: normalizeCountryIdList(item?.selectedCountries),
+});
+
 /**
  * Admin saves one settings card at a time. The client always sends keys for that card;
  * password inputs often arrive as "" even though Mongo already has the secret (browser
@@ -139,6 +145,8 @@ const sanitizeIncludedItemsList = (arr) =>
               description: '',
               icon: '',
               color: 'blue',
+              showInAllActiveCountries: true,
+              selectedCountries: [],
             };
           }
 
@@ -147,9 +155,100 @@ const sanitizeIncludedItemsList = (arr) =>
             description: String(item?.description ?? '').trim(),
             icon: String(item?.icon ?? '').trim(),
             color: String(item?.color ?? 'blue').trim() || 'blue',
+            showInAllActiveCountries: item?.showInAllActiveCountries !== false,
+            selectedCountries: normalizeCountryIdList(item?.selectedCountries),
           };
         })
         .filter((item) => item.title)
+    : [];
+
+const normalizeCountryIdList = (list) =>
+  Array.isArray(list)
+    ? list.map((item) => String(item ?? '').trim()).filter(Boolean)
+    : [];
+
+const sanitizeVisibility = (item) => ({
+  showInAllActiveCountries: item?.showInAllActiveCountries !== false,
+  selectedCountries: normalizeCountryIdList(item?.selectedCountries),
+});
+
+const sanitizeVisibleTextList = (arr, key = 'text') =>
+  Array.isArray(arr)
+    ? arr
+        .map((item) => {
+          if (typeof item === 'string') {
+            const text = String(item).trim();
+            return text
+              ? {
+                  [key]: text,
+                  showInAllActiveCountries: true,
+                  selectedCountries: [],
+                }
+              : null;
+          }
+          const text = String(item?.[key] ?? item?.text ?? '').trim();
+          if (!text) return null;
+          return {
+            [key]: text,
+            ...sanitizeVisibility(item),
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+const sanitizeFaqList = (arr) =>
+  Array.isArray(arr)
+    ? arr
+        .map((item) => {
+          const question = String(item?.question ?? '').trim();
+          const answer = String(item?.answer ?? '').trim();
+          return question && answer
+            ? {
+                question,
+                answer,
+                ...sanitizeVisibility(item),
+              }
+            : null;
+        })
+        .filter(Boolean)
+    : [];
+
+const sanitizeHowItWorksList = (arr) =>
+  Array.isArray(arr)
+    ? arr
+        .map((item) => {
+          const title = String(item?.title ?? '').trim();
+          const description = String(item?.description ?? '').trim();
+          return title && description
+            ? {
+                title,
+                description,
+                ...sanitizeVisibility(item),
+              }
+            : null;
+        })
+        .filter(Boolean)
+    : [];
+
+const sanitizeGlobalRequiredDocumentList = (arr) =>
+  Array.isArray(arr)
+    ? arr
+        .map((item) => {
+          if (typeof item === 'string') {
+            const key = String(item).trim();
+            return key
+              ? { key, showInAllActiveCountries: true, selectedCountries: [] }
+              : null;
+          }
+          const key = String(item?.key ?? '').trim();
+          return key
+            ? {
+                key,
+                ...sanitizeVisibility(item),
+              }
+            : null;
+        })
+        .filter(Boolean)
     : [];
 
 const sanitizeLandingHeroHighlights = (arr) => {
@@ -178,45 +277,39 @@ const normalizeSettingsUpdatePayload = (body = {}) => ({
   destinationWhyBookNow:
     body.destinationWhyBookNow === undefined
       ? undefined
-      : Array.isArray(body.destinationWhyBookNow)
-        ? body.destinationWhyBookNow.map((item) => String(item ?? '').trim()).filter(Boolean)
-        : [],
+      : sanitizeVisibleTextList(body.destinationWhyBookNow, 'text'),
   destinationIncludedItems:
     body.destinationIncludedItems === undefined
-      ? []
+      ? undefined
       : sanitizeIncludedItemsList(body.destinationIncludedItems),
   destinationFaqs:
     body.destinationFaqs === undefined
       ? undefined
-      : Array.isArray(body.destinationFaqs)
-        ? body.destinationFaqs
-            .map((item) => ({
-              question: String(item?.question ?? '').trim(),
-              answer: String(item?.answer ?? '').trim(),
-            }))
-            .filter((item) => item.question && item.answer)
-        : [],
+      : sanitizeFaqList(body.destinationFaqs),
   destinationHowItWorks:
     body.destinationHowItWorks === undefined
       ? undefined
-      : Array.isArray(body.destinationHowItWorks)
-        ? body.destinationHowItWorks
-            .map((item) => ({
-              title: String(item?.title ?? '').trim(),
-              description: String(item?.description ?? '').trim(),
-            }))
-            .filter((item) => item.title && item.description)
-        : [],
+      : sanitizeHowItWorksList(body.destinationHowItWorks),
   destinationVisaRequirements:
     body.destinationVisaRequirements === undefined
       ? undefined
-      : Array.isArray(body.destinationVisaRequirements)
-        ? body.destinationVisaRequirements.map((item) => String(item ?? '').trim()).filter(Boolean)
-        : [],
+      : sanitizeVisibleTextList(body.destinationVisaRequirements, 'text'),
   landingHeroHighlights:
     body.landingHeroHighlights === undefined
       ? undefined
       : sanitizeLandingHeroHighlights(body.landingHeroHighlights),
+  popularCountries:
+    body.popularCountries === undefined
+      ? undefined
+      : Array.isArray(body.popularCountries)
+        ? body.popularCountries.map(s => String(s || '').trim()).filter(Boolean)
+        : ["USA", "UK", "EU Schengen", "Dubai", "Japan"],
+  showPopularCountries:
+    body.showPopularCountries === undefined
+      ? undefined
+      : body.showPopularCountries === false || body.showPopularCountries === 'false'
+        ? false
+        : true,
   allowedFileFormats:
     body.allowedFileFormats === undefined
       ? undefined
@@ -291,6 +384,8 @@ const updateSettings = async (req, res) => {
       destinationHowItWorks,
       destinationVisaRequirements,
       landingHeroHighlights,
+      popularCountries,
+      showPopularCountries,
     } = safePayload;
     console.log('Admin updating settings:', {
       razorpayKeyId,
@@ -356,42 +451,30 @@ const updateSettings = async (req, res) => {
       const nextRate = Number.isFinite(Number(gstRate)) ? Number(gstRate) : 0;
       settings.gstRate = nextRate >= 0 ? nextRate : 0;
     }
-
+ 
     if (destinationWhyBookNow !== undefined) {
-      settings.destinationWhyBookNow = Array.isArray(destinationWhyBookNow)
-        ? destinationWhyBookNow.map((s) => String(s ?? '').trim()).filter(Boolean)
-        : [];
+      settings.destinationWhyBookNow = sanitizeVisibleTextList(destinationWhyBookNow, 'text');
     }
     if (destinationIncludedItems !== undefined) {
       settings.destinationIncludedItems = sanitizeIncludedItemsList(destinationIncludedItems);
     }
     if (destinationFaqs !== undefined) {
-      settings.destinationFaqs = Array.isArray(destinationFaqs)
-        ? destinationFaqs
-            .map((f) => ({
-              question: String(f?.question ?? '').trim(),
-              answer: String(f?.answer ?? '').trim(),
-            }))
-            .filter((f) => f.question && f.answer)
-        : [];
+      settings.destinationFaqs = sanitizeFaqList(destinationFaqs);
     }
     if (destinationHowItWorks !== undefined) {
-      settings.destinationHowItWorks = Array.isArray(destinationHowItWorks)
-        ? destinationHowItWorks
-            .map((s) => ({
-              title: String(s?.title ?? '').trim(),
-              description: String(s?.description ?? '').trim(),
-            }))
-            .filter((s) => s.title && s.description)
-        : [];
+      settings.destinationHowItWorks = sanitizeHowItWorksList(destinationHowItWorks);
     }
     if (destinationVisaRequirements !== undefined) {
-      settings.destinationVisaRequirements = Array.isArray(destinationVisaRequirements)
-        ? destinationVisaRequirements.map((s) => String(s ?? '').trim()).filter(Boolean)
-        : [];
+      settings.destinationVisaRequirements = sanitizeVisibleTextList(destinationVisaRequirements, 'text');
     }
     if (landingHeroHighlights !== undefined) {
       settings.landingHeroHighlights = sanitizeLandingHeroHighlights(landingHeroHighlights);
+    }
+    if (popularCountries !== undefined) {
+      settings.popularCountries = popularCountries;
+    }
+    if (showPopularCountries !== undefined) {
+      settings.showPopularCountries = Boolean(showPopularCountries);
     }
 
     await settings.save();
@@ -509,44 +592,46 @@ const getDestinationPageContent = async (req, res) => {
     const rawWhy = settings?.destinationWhyBookNow;
     const whyBookNow =
       Array.isArray(rawWhy) && rawWhy.length
-        ? rawWhy.map((s) => String(s ?? '').trim()).filter(Boolean)
-        : DESTINATION_WHY_BOOK_NOW_FALLBACK;
+        ? sanitizeVisibleTextList(rawWhy, 'text')
+        : DESTINATION_WHY_BOOK_NOW_FALLBACK.map((text) => ({
+            text,
+            showInAllActiveCountries: true,
+            selectedCountries: [],
+          }));
     const rawInc = settings?.destinationIncludedItems;
     const included =
       Array.isArray(rawInc) && rawInc.length
         ? sanitizeIncludedItemsList(rawInc)
-        : DESTINATION_INCLUDED_FALLBACK;
+        : DESTINATION_INCLUDED_FALLBACK.map((item) => withDefaultVisibility(item));
     const rawFaqs = settings?.destinationFaqs;
     const faqs =
       Array.isArray(rawFaqs) && rawFaqs.length
-        ? rawFaqs
-            .map((f) => ({
-              question: String(f?.question ?? '').trim(),
-              answer: String(f?.answer ?? '').trim(),
-            }))
-            .filter((f) => f.question && f.answer)
-        : DESTINATION_FAQS_FALLBACK;
+        ? sanitizeFaqList(rawFaqs)
+        : DESTINATION_FAQS_FALLBACK.map((item) => withDefaultVisibility(item));
     const rawHow = settings?.destinationHowItWorks;
     const howItWorks =
       Array.isArray(rawHow) && rawHow.length
-        ? rawHow
-            .map((s) => ({
-              title: String(s?.title ?? '').trim(),
-              description: String(s?.description ?? '').trim(),
-            }))
-            .filter((s) => s.title && s.description)
-        : DESTINATION_HOW_IT_WORKS_FALLBACK;
+        ? sanitizeHowItWorksList(rawHow)
+        : DESTINATION_HOW_IT_WORKS_FALLBACK.map((item) => withDefaultVisibility(item));
     const rawVisaReq = settings?.destinationVisaRequirements;
     const visaRequirements =
       Array.isArray(rawVisaReq) && rawVisaReq.length
-        ? rawVisaReq.map((s) => String(s ?? '').trim()).filter(Boolean)
-        : DESTINATION_VISA_REQUIREMENTS_FALLBACK;
+        ? sanitizeVisibleTextList(rawVisaReq, 'text')
+        : DESTINATION_VISA_REQUIREMENTS_FALLBACK.map((text) => ({
+            text,
+            showInAllActiveCountries: true,
+            selectedCountries: [],
+          }));
     const rawLandingHighlights = settings?.landingHeroHighlights;
     const landingHeroHighlights =
       Array.isArray(rawLandingHighlights) && rawLandingHighlights.length
         ? sanitizeLandingHeroHighlights(rawLandingHighlights)
         : LANDING_HERO_HIGHLIGHTS_FALLBACK;
     const showVisaRequirements = settings?.showVisaRequirements !== false;
+    const popularCountries = Array.isArray(settings?.popularCountries) && settings.popularCountries.length > 0
+      ? settings.popularCountries
+      : ["USA", "UK", "EU Schengen", "Dubai", "Japan"];
+    const showPopularCountries = settings?.showPopularCountries !== false;
 
     res.json({
       success: true,
@@ -558,6 +643,8 @@ const getDestinationPageContent = async (req, res) => {
         visaRequirements,
         showVisaRequirements,
         landingHeroHighlights,
+        popularCountries,
+        showPopularCountries,
       },
     });
   } catch (error) {

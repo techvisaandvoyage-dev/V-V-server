@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const Application = require('../models/Application');
 const Counter = require('../models/Counter');
@@ -979,6 +980,61 @@ const updateApplicationStatus = async (req, res) => {
   }
 };
 
+/**
+ * @route   GET /api/admin/applications/download-document
+ * @desc    Download an uploaded application document as attachment
+ * @access  Private (Admin)
+ * @query   ?path=/uploads/... or absolute url
+ */
+const downloadApplicationDocument = async (req, res) => {
+  try {
+    const rawPath = String(req.query?.path || '').trim();
+    if (!rawPath) {
+      return res.status(400).json({ success: false, message: 'Document path is required.' });
+    }
+
+    const fileNameFromPath = decodeURIComponent(rawPath.split('/').pop() || 'document');
+
+    if (/^https?:\/\//i.test(rawPath)) {
+      const response = await fetch(rawPath);
+      if (!response.ok) {
+        return res.status(response.status).json({
+          success: false,
+          message: `Failed to fetch remote document (HTTP ${response.status}).`,
+        });
+      }
+
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const arrayBuffer = await response.arrayBuffer();
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${fileNameFromPath}"`);
+      return res.send(Buffer.from(arrayBuffer));
+    }
+
+    const normalizedPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+    if (!normalizedPath.startsWith('/uploads/')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only uploaded documents can be downloaded.',
+      });
+    }
+
+    const uploadsRoot = path.resolve(__dirname, '..', 'uploads');
+    const absoluteFilePath = path.resolve(__dirname, '..', normalizedPath.replace(/^\//, ''));
+    if (!absoluteFilePath.startsWith(uploadsRoot)) {
+      return res.status(400).json({ success: false, message: 'Invalid document path.' });
+    }
+    if (!fs.existsSync(absoluteFilePath)) {
+      return res.status(404).json({ success: false, message: 'Document file not found.' });
+    }
+
+    return res.download(absoluteFilePath, fileNameFromPath);
+  } catch (error) {
+    console.error('downloadApplicationDocument:', error);
+    return res.status(500).json({ success: false, message: 'Server error downloading document.' });
+  }
+};
+
 module.exports = {
   submitApplication,
   createCheckoutDraft,
@@ -990,5 +1046,6 @@ module.exports = {
   getApplicationById,
   updateApplicationByAdmin,
   uploadApprovedVisaFile,
-  updateApplicationStatus
+  updateApplicationStatus,
+  downloadApplicationDocument,
 };  

@@ -20,19 +20,35 @@ const normalizeIncludedItem = (item) => {
     description: String(item?.description ?? '').trim(),
     icon: String(item?.icon ?? '').trim(),
     color: String(item?.color ?? 'blue').trim() || 'blue',
+    showInAllActiveCountries: item?.showInAllActiveCountries !== false,
+    selectedCountries: normalizeStringList(item?.selectedCountries),
   };
 };
 
 const normalizeFaq = (item) => {
   const question = String(item?.question ?? '').trim();
   const answer = String(item?.answer ?? '').trim();
-  return question && answer ? { question, answer } : null;
+  return question && answer
+    ? {
+        question,
+        answer,
+        showInAllActiveCountries: item?.showInAllActiveCountries !== false,
+        selectedCountries: normalizeStringList(item?.selectedCountries),
+      }
+    : null;
 };
 
 const normalizeHowItWorks = (item) => {
   const title = String(item?.title ?? '').trim();
   const description = String(item?.description ?? '').trim();
-  return title && description ? { title, description } : null;
+  return title && description
+    ? {
+        title,
+        description,
+        showInAllActiveCountries: item?.showInAllActiveCountries !== false,
+        selectedCountries: normalizeStringList(item?.selectedCountries),
+      }
+    : null;
 };
 
 const normalizeStringList = (list) =>
@@ -40,8 +56,31 @@ const normalizeStringList = (list) =>
     ? list.map((item) => String(item ?? '').trim()).filter(Boolean)
     : [];
 
+const normalizeVisibleTextItem = (item, key = 'text') => {
+  if (typeof item === 'string') {
+    const text = String(item).trim();
+    return text
+      ? {
+          [key]: text,
+          showInAllActiveCountries: true,
+          selectedCountries: [],
+        }
+      : null;
+  }
+  const text = String(item?.[key] ?? item?.text ?? '').trim();
+  return text
+    ? {
+        [key]: text,
+        showInAllActiveCountries: item?.showInAllActiveCountries !== false,
+        selectedCountries: normalizeStringList(item?.selectedCountries),
+      }
+    : null;
+};
+
 const sanitizeSettingsPayload = (raw = {}) => ({
-  destinationWhyBookNow: normalizeStringList(raw.destinationWhyBookNow),
+  destinationWhyBookNow: (Array.isArray(raw.destinationWhyBookNow) ? raw.destinationWhyBookNow : [])
+    .map((item) => normalizeVisibleTextItem(item, 'text'))
+    .filter(Boolean),
   destinationIncludedItems: (Array.isArray(raw.destinationIncludedItems) ? raw.destinationIncludedItems : [])
     .map(normalizeIncludedItem)
     .filter(Boolean),
@@ -51,7 +90,25 @@ const sanitizeSettingsPayload = (raw = {}) => ({
   destinationHowItWorks: (Array.isArray(raw.destinationHowItWorks) ? raw.destinationHowItWorks : [])
     .map(normalizeHowItWorks)
     .filter(Boolean),
-  destinationVisaRequirements: normalizeStringList(raw.destinationVisaRequirements),
+  destinationVisaRequirements: (Array.isArray(raw.destinationVisaRequirements) ? raw.destinationVisaRequirements : [])
+    .map((item) => normalizeVisibleTextItem(item, 'text'))
+    .filter(Boolean),
+  globalRequiredDocuments: (Array.isArray(raw.globalRequiredDocuments) ? raw.globalRequiredDocuments : [])
+    .map((item) => {
+      if (typeof item === 'string') {
+        const key = String(item).trim();
+        return key ? { key, showInAllActiveCountries: true, selectedCountries: [] } : null;
+      }
+      const key = String(item?.key ?? '').trim();
+      return key
+        ? {
+            key,
+            showInAllActiveCountries: item?.showInAllActiveCountries !== false,
+            selectedCountries: normalizeStringList(item?.selectedCountries),
+          }
+        : null;
+    })
+    .filter(Boolean),
 });
 
 const loadSettingsDocument = async () => {
