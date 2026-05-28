@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { loginAdmin, changePassword } = require('../controllers/adminController');
-const { getAllApplications, getApplicationById, updateApplicationByAdmin, updateApplicationStatus, uploadApprovedVisaFile } = require('../controllers/applicationController');
+const { getAllApplications, getApplicationById, updateApplicationByAdmin, updateApplicationStatus, uploadApprovedVisaFile, downloadApplicationDocument } = require('../controllers/applicationController');
 const { getSettings, updateSettings } = require('../controllers/settingsController');
 const { getAllTransactions } = require('../controllers/paymentController');
 const {
@@ -11,6 +11,7 @@ const {
   deleteCountry,
   uploadCountryImage,
   refreshUnsplashCountryImages,
+  bulkUpdateCountryVisibility,
 } = require('../controllers/countryController');
 const {
   createStaticPage,
@@ -74,6 +75,7 @@ router.post('/login', loginAdmin);
 router.put('/change-password', protect, requireAdmin, changePassword);
 
 router.get('/applications', protect, requireAdmin, getAllApplications);
+router.get('/applications/download-document', protect, requireAdmin, downloadApplicationDocument);
 router.get('/applications/:id', protect, requireAdmin, getApplicationById);
 router.put('/applications/:id', protect, requireAdmin, updateApplicationByAdmin);
 router.post('/applications/:id/visa-file', protect, requireAdmin, visaFileUpload.single('visaFile'), uploadApprovedVisaFile);
@@ -88,6 +90,7 @@ router.get('/transactions', protect, requireAdmin, getAllTransactions);
 
 // Country management (admin only)
 router.get('/countries-list', protect, requireAdmin, getCountries);
+router.post('/countries/visibility', protect, requireAdmin, bulkUpdateCountryVisibility);
 router.post('/countries/upload-image', protect, requireAdmin, countryImageUpload.single('image'), uploadCountryImage);
 router.post('/countries/refresh-unsplash-images', protect, requireAdmin, refreshUnsplashCountryImages);
 router.post('/countries', protect, requireAdmin, addCountry);

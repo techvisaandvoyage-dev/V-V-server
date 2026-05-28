@@ -67,6 +67,7 @@ const countrySchema = new mongoose.Schema({
     lowercase: true,
   },
   name: { type: String, required: true, trim: true },
+  isActive: { type: Boolean, default: true },
   flagEmoji: { type: String, default: '🌍' },
   basePrice: { type: Number, required: true, default: 0 },
   useGlobalBasePrice: { type: Boolean, default: false },

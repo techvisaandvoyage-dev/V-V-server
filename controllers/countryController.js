@@ -233,6 +233,87 @@ const getOrCreateSettings = async () => {
   return loadSettingsDocument();
 };
 
+const normalizeControlSelectedCountries = (values) =>
+  Array.isArray(values)
+    ? Array.from(new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean)))
+    : [];
+
+const resolveControlCountryScope = async (body = {}) => {
+  const activeCountries = await Country.find({ isActive: { $ne: false } }).select('_id slug').lean();
+  const activeIds = new Set(
+    activeCountries.flatMap((country) =>
+      [country?._id, country?.slug].map((value) => String(value ?? '').trim()).filter(Boolean)
+    )
+  );
+  const applyToAllActiveCountries = body?.applyToAllActiveCountries !== false;
+  const selectedCountries = normalizeControlSelectedCountries(body?.selectedCountries).filter((id) =>
+    activeIds.has(id)
+  );
+  if (!applyToAllActiveCountries && selectedCountries.length === 0) {
+    const error = new Error('Please select at least one country.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const targetIds = applyToAllActiveCountries
+    ? activeCountries.map((country) => country._id)
+    : activeCountries
+        .filter((country) => {
+          const candidates = [country?._id, country?.slug]
+            .map((value) => String(value ?? '').trim())
+            .filter(Boolean);
+          return candidates.some((candidate) => selectedCountries.includes(candidate));
+        })
+        .map((country) => country._id);
+  return {
+    applyToAllActiveCountries,
+    selectedCountries: applyToAllActiveCountries ? [] : selectedCountries,
+    targetIds,
+  };
+};
+
+const normalizeCountryVisibilityIdCandidates = (country = {}) =>
+  [
+    country?._id,
+    country?.id,
+    country?.slug,
+    country?.name,
+  ]
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean);
+
+const sanitizeGlobalRequiredDocumentEntries = (items) =>
+  Array.isArray(items)
+    ? items
+        .map((item) => {
+          if (typeof item === 'string') {
+            const key = String(item).trim();
+            return key ? { key, showInAllActiveCountries: true, selectedCountries: [] } : null;
+          }
+          const key = String(item?.key ?? '').trim();
+          return key
+            ? {
+                key,
+                showInAllActiveCountries: item?.showInAllActiveCountries !== false,
+                selectedCountries: Array.isArray(item?.selectedCountries)
+                  ? item.selectedCountries.map((value) => String(value ?? '').trim()).filter(Boolean)
+                  : [],
+              }
+            : null;
+        })
+        .filter(Boolean)
+    : [];
+
+const resolveVisibleGlobalRequiredDocuments = (items, country) => {
+  const candidates = new Set(normalizeCountryVisibilityIdCandidates(country));
+  return sanitizeGlobalRequiredDocumentEntries(items)
+    .filter((item) => {
+      if (item.showInAllActiveCountries !== false) return true;
+      if (!candidates.size) return false;
+      return item.selectedCountries.some((value) => candidates.has(String(value ?? '').trim()));
+    })
+    .map((item) => item.key);
+};
+
 /**
  * Convert a stored country document into the public-facing shape consumed by every
  * card, the destination details page, and the admin edit modal.
@@ -254,9 +335,8 @@ const resolveCountryDoc = (country, settings) => {
   const globalLengthOfStay = String(settings?.globalLengthOfStay ?? '').trim();
   const globalEntryType = String(settings?.globalEntryType ?? '').trim();
   const globalProcessingDays = String(settings?.globalProcessingDays ?? '').trim();
-  const globalRequiredDocuments = Array.isArray(settings?.globalRequiredDocuments)
-    ? settings.globalRequiredDocuments.map((k) => String(k ?? '').trim()).filter(Boolean)
-    : [];
+  const globalRequiredDocumentEntries = sanitizeGlobalRequiredDocumentEntries(settings?.globalRequiredDocuments);
+  const globalRequiredDocuments = resolveVisibleGlobalRequiredDocuments(globalRequiredDocumentEntries, obj);
   const useGlobalVisaType = obj.useGlobalVisaType !== false;
   const useGlobalValidity = obj.useGlobalValidity !== false;
   const useGlobalLengthOfStay = obj.useGlobalLengthOfStay !== false;
@@ -322,6 +402,7 @@ const resolveCountryDoc = (country, settings) => {
   });
   return {
     ...obj,
+    isActive: obj.isActive !== false,
     basePrice: resolvedBasePrice,
     governmentFee: resolvedGovernmentFee,
     visaType: resolvedVisaType,
@@ -498,7 +579,7 @@ const addCountry = async (req, res) => {
       name, flagEmoji, basePrice, governmentFee, processingDays, difficulty,
       visaType, validity, lengthOfStay, entryType, continent, imageUrl, description,
       visaInformation,
-      requirements, requiredDocuments, trending, successRate,
+      requirements, requiredDocuments, trending, successRate, isActive,
       whyBookNow, includedItems, faqs, howItWorks,
       gstEnabled, gstRate, useGlobalGst,
       excludeDestinationWhyBookNow,
@@ -509,12 +590,12 @@ const addCountry = async (req, res) => {
     } = req.body;
 
     if (!name || !basePrice) {
-      return res.status(400).json({ success: false, message: 'Name and base price are required.' });
+      return res.status(400).json({ success: false, message: 'Name and service fee are required.' });
     }
     if (!Number.isFinite(Number(basePrice)) || Number(basePrice) < 0) {
       return res.status(400).json({
         success: false,
-        message: 'Base Price must be a valid number greater than or equal to 0.',
+        message: 'Service Fee must be a valid number greater than or equal to 0.',
       });
     }
 
@@ -533,9 +614,8 @@ const addCountry = async (req, res) => {
     const globalProcessingDays = String(settings?.globalProcessingDays ?? '').trim();
     const globalBasePrice = Number(settings?.globalBasePrice);
     const globalGovernmentFee = Number(settings?.globalGovernmentFee);
-    const globalRequiredDocs = Array.isArray(settings?.globalRequiredDocuments)
-      ? settings.globalRequiredDocuments.map((k) => String(k ?? '').trim()).filter(Boolean)
-      : [];
+    const globalRequiredDocs = sanitizeGlobalRequiredDocumentEntries(settings?.globalRequiredDocuments)
+      .map((item) => item.key);
     const typedVisa = String(visaType ?? '').trim();
     const typedValidity = String(validity ?? '').trim();
     const typedLengthOfStay = String(lengthOfStay ?? '').trim();
@@ -581,6 +661,7 @@ const addCountry = async (req, res) => {
     const country = await Country.create({
       slug,
       name,
+      isActive: isActive !== false,
       flagEmoji: flagEmoji || '🌍',
       basePrice: parsedBasePrice,
       useGlobalBasePrice: newUseGlobalBasePrice,
@@ -637,7 +718,7 @@ const updateCountry = async (req, res) => {
       name, flagEmoji, basePrice, governmentFee, processingDays, difficulty,
       visaType, validity, lengthOfStay, entryType, continent, imageUrl, description,
       visaInformation,
-      requirements, requiredDocuments, trending, successRate,
+      requirements, requiredDocuments, trending, successRate, isActive,
       whyBookNow, includedItems, faqs, howItWorks,
       gstEnabled, gstRate, useGlobalGst,
       excludeDestinationWhyBookNow,
@@ -654,6 +735,7 @@ const updateCountry = async (req, res) => {
       country.slug = slugify(name);
     }
     if (name !== undefined) country.name = name;
+    if (isActive !== undefined) country.isActive = Boolean(isActive);
     if (flagEmoji !== undefined) country.flagEmoji = flagEmoji;
     if (difficulty !== undefined) country.difficulty = difficulty;
     // Visa Type / Validity / Processing Days are part of the universal control system. The save logic:
@@ -684,7 +766,7 @@ const updateCountry = async (req, res) => {
         if (!Number.isFinite(parsed) || parsed < 0) {
           return res.status(400).json({
             success: false,
-            message: 'Base Price must be a valid number greater than or equal to 0.',
+            message: 'Service Fee must be a valid number greater than or equal to 0.',
           });
         }
         if (Number.isFinite(globalBasePrice) && globalBasePrice >= 0 && parsed === globalBasePrice) {
@@ -777,9 +859,8 @@ const updateCountry = async (req, res) => {
     //   • Anything else (different members) → per-country override
     if (Array.isArray(requiredDocuments)) {
       const settings = await getOrCreateSettings();
-      const globalDocs = Array.isArray(settings?.globalRequiredDocuments)
-        ? settings.globalRequiredDocuments.map((k) => String(k ?? '').trim()).filter(Boolean)
-        : [];
+      const globalDocs = sanitizeGlobalRequiredDocumentEntries(settings?.globalRequiredDocuments)
+        .map((item) => item.key);
       const typed = requiredDocuments.map((k) => String(k ?? '').trim()).filter(Boolean);
       const sameAsGlobal =
         typed.length === 0 ||
@@ -854,6 +935,37 @@ const deleteCountry = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/**
+ * @route   POST /api/admin/countries/visibility
+ * @desc    Bulk update country public visibility
+ * @access  Admin
+ * @body    { isActive: boolean }
+ */
+const bulkUpdateCountryVisibility = async (req, res) => {
+  const { isActive } = req.body || {};
+  if (typeof isActive !== 'boolean') {
+    return res.status(400).json({
+      success: false,
+      message: 'isActive (boolean) is required.',
+    });
+  }
+  try {
+    const result = await Country.updateMany({}, { $set: { isActive } });
+    res.json({
+      success: true,
+      isActive,
+      matched: result.matchedCount ?? result.n ?? 0,
+      modified: result.modifiedCount ?? result.nModified ?? 0,
+      message: isActive
+        ? 'All countries are now visible on the public site.'
+        : 'All countries are now hidden from the public site.',
+    });
+  } catch (err) {
+    console.error('bulkUpdateCountryVisibility error:', err);
+    res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Server error' });
   }
 };
 
@@ -946,9 +1058,8 @@ const getGlobalCountryDefaults = async (req, res) => {
     const usingGlobalRequiredDocuments = await Country.countDocuments({
       $or: [{ useGlobalRequiredDocuments: { $exists: false } }, { useGlobalRequiredDocuments: true }],
     });
-    const globalRequiredDocuments = Array.isArray(settings?.globalRequiredDocuments)
-      ? settings.globalRequiredDocuments.map((k) => String(k ?? '').trim()).filter(Boolean)
-      : [];
+    const globalRequiredDocumentEntries = sanitizeGlobalRequiredDocumentEntries(settings?.globalRequiredDocuments);
+    const globalRequiredDocuments = globalRequiredDocumentEntries.map((item) => item.key);
     res.json({
       success: true,
       defaults: {
@@ -956,16 +1067,33 @@ const getGlobalCountryDefaults = async (req, res) => {
           Number.isFinite(Number(settings?.globalBasePrice)) && Number(settings?.globalBasePrice) >= 0
             ? Number(settings?.globalBasePrice)
             : null,
+        globalBasePriceVisibility: {
+          applyToAllActiveCountries: settings?.globalBasePriceVisibility?.applyToAllActiveCountries !== false,
+          selectedCountries: normalizeControlSelectedCountries(settings?.globalBasePriceVisibility?.selectedCountries),
+        },
         globalGovernmentFee:
           Number.isFinite(Number(settings?.globalGovernmentFee)) && Number(settings?.globalGovernmentFee) >= 0
             ? Number(settings?.globalGovernmentFee)
             : null,
+        globalGovernmentFeeVisibility: {
+          applyToAllActiveCountries: settings?.globalGovernmentFeeVisibility?.applyToAllActiveCountries !== false,
+          selectedCountries: normalizeControlSelectedCountries(settings?.globalGovernmentFeeVisibility?.selectedCountries),
+        },
         globalVisaType: String(settings?.globalVisaType ?? '').trim(),
         globalValidity: String(settings?.globalValidity ?? '').trim(),
         globalLengthOfStay: String(settings?.globalLengthOfStay ?? '').trim(),
         globalEntryType: String(settings?.globalEntryType ?? '').trim(),
+        globalEntryTypeVisibility: {
+          applyToAllActiveCountries: settings?.globalEntryTypeVisibility?.applyToAllActiveCountries !== false,
+          selectedCountries: normalizeControlSelectedCountries(settings?.globalEntryTypeVisibility?.selectedCountries),
+        },
         globalProcessingDays: String(settings?.globalProcessingDays ?? '').trim(),
+        globalProcessingDaysVisibility: {
+          applyToAllActiveCountries: settings?.globalProcessingDaysVisibility?.applyToAllActiveCountries !== false,
+          selectedCountries: normalizeControlSelectedCountries(settings?.globalProcessingDaysVisibility?.selectedCountries),
+        },
         globalRequiredDocuments,
+        globalRequiredDocumentEntries,
       },
       display: resolveDisplayToggles(settings),
       documentCatalog: buildDocumentCatalog(settings, true),
@@ -1011,15 +1139,20 @@ const updateGlobalBasePrice = async (req, res) => {
   if (!Number.isFinite(parsedBasePrice) || parsedBasePrice < 0) {
     return res.status(400).json({
       success: false,
-      message: 'Base Price must be a valid number greater than or equal to 0.',
+      message: 'Service Fee must be a valid number greater than or equal to 0.',
     });
   }
   try {
+    const scope = await resolveControlCountryScope(req.body || {});
     const settings = await getOrCreateSettings();
     settings.globalBasePrice = parsedBasePrice;
+    settings.globalBasePriceVisibility = {
+      applyToAllActiveCountries: scope.applyToAllActiveCountries,
+      selectedCountries: scope.selectedCountries,
+    };
     await settings.save();
     const result = await Country.updateMany(
-      {},
+      { _id: { $in: scope.targetIds } },
       { $set: { useGlobalBasePrice: true, basePrice: parsedBasePrice } }
     );
     res.json({
@@ -1027,11 +1160,11 @@ const updateGlobalBasePrice = async (req, res) => {
       globalBasePrice: parsedBasePrice,
       matched: result.matchedCount ?? result.n ?? 0,
       modified: result.modifiedCount ?? result.nModified ?? 0,
-      message: `Base Price set to ₹${parsedBasePrice} on all countries.`,
+      message: `Service Fee updated for ${scope.applyToAllActiveCountries ? 'all active countries' : 'selected countries'}.`,
     });
   } catch (err) {
     console.error('[control] updateGlobalBasePrice error:', err);
-    res.status(500).json({ success: false, message: err.message || 'Server error' });
+    res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Server error' });
   }
 };
 
@@ -1055,11 +1188,16 @@ const updateGlobalGovernmentFee = async (req, res) => {
     });
   }
   try {
+    const scope = await resolveControlCountryScope(req.body || {});
     const settings = await getOrCreateSettings();
     settings.globalGovernmentFee = parsedGovernmentFee;
+    settings.globalGovernmentFeeVisibility = {
+      applyToAllActiveCountries: scope.applyToAllActiveCountries,
+      selectedCountries: scope.selectedCountries,
+    };
     await settings.save();
     const result = await Country.updateMany(
-      {},
+      { _id: { $in: scope.targetIds } },
       { $set: { useGlobalGovernmentFee: true, governmentFee: parsedGovernmentFee } }
     );
     res.json({
@@ -1067,11 +1205,11 @@ const updateGlobalGovernmentFee = async (req, res) => {
       globalGovernmentFee: parsedGovernmentFee,
       matched: result.matchedCount ?? result.n ?? 0,
       modified: result.modifiedCount ?? result.nModified ?? 0,
-      message: `Government Fee set to ₹${parsedGovernmentFee} on all countries.`,
+      message: `Government Fee updated for ${scope.applyToAllActiveCountries ? 'all active countries' : 'selected countries'}.`,
     });
   } catch (err) {
     console.error('[control] updateGlobalGovernmentFee error:', err);
-    res.status(500).json({ success: false, message: err.message || 'Server error' });
+    res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Server error' });
   }
 };
 
@@ -1200,15 +1338,20 @@ const updateGlobalEntryType = async (req, res) => {
   if (!entryType) {
     return res.status(400).json({
       success: false,
-      message: 'Entry is required — pick a value or type your own.',
+      message: 'Entry is required - pick a value or type your own.',
     });
   }
   try {
+    const scope = await resolveControlCountryScope(req.body || {});
     const settings = await getOrCreateSettings();
     settings.globalEntryType = entryType;
+    settings.globalEntryTypeVisibility = {
+      applyToAllActiveCountries: scope.applyToAllActiveCountries,
+      selectedCountries: scope.selectedCountries,
+    };
     await settings.save();
     const result = await Country.updateMany(
-      {},
+      { _id: { $in: scope.targetIds } },
       { $set: { useGlobalEntryType: true, entryType } }
     );
     res.json({
@@ -1216,11 +1359,11 @@ const updateGlobalEntryType = async (req, res) => {
       globalEntryType: entryType,
       matched: result.matchedCount ?? result.n ?? 0,
       modified: result.modifiedCount ?? result.nModified ?? 0,
-      message: `Entry set to "${entryType}" on all countries.`,
+      message: `Entry updated for ${scope.applyToAllActiveCountries ? 'all active countries' : 'selected countries'}.`,
     });
   } catch (err) {
     console.error('[control] updateGlobalEntryType error:', err);
-    res.status(500).json({ success: false, message: err.message || 'Server error' });
+    res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Server error' });
   }
 };
 
@@ -1240,15 +1383,20 @@ const updateGlobalProcessingDays = async (req, res) => {
   if (!processingDays) {
     return res.status(400).json({
       success: false,
-      message: 'Processing Days is required — pick a value or type your own.',
+      message: 'Processing Days is required - pick a value or type your own.',
     });
   }
   try {
+    const scope = await resolveControlCountryScope(req.body || {});
     const settings = await getOrCreateSettings();
     settings.globalProcessingDays = processingDays;
+    settings.globalProcessingDaysVisibility = {
+      applyToAllActiveCountries: scope.applyToAllActiveCountries,
+      selectedCountries: scope.selectedCountries,
+    };
     await settings.save();
     const result = await Country.updateMany(
-      {},
+      { _id: { $in: scope.targetIds } },
       { $set: { useGlobalProcessingDays: true, processingDays } }
     );
     res.json({
@@ -1256,11 +1404,11 @@ const updateGlobalProcessingDays = async (req, res) => {
       globalProcessingDays: processingDays,
       matched: result.matchedCount ?? result.n ?? 0,
       modified: result.modifiedCount ?? result.nModified ?? 0,
-      message: `Processing Days set to "${processingDays}" on all countries.`,
+      message: `Processing Days updated for ${scope.applyToAllActiveCountries ? 'all active countries' : 'selected countries'}.`,
     });
   } catch (err) {
     console.error('[control] updateGlobalProcessingDays error:', err);
-    res.status(500).json({ success: false, message: err.message || 'Server error' });
+    res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Server error' });
   }
 };
 
@@ -1317,7 +1465,7 @@ const updateCountryDisplayToggles = async (req, res) => {
  *          Unknown keys (not in the built-in catalog or `customDocuments`)
  *          are silently dropped to prevent typos from leaking through.
  * @access  Admin
- * @body    { requiredDocuments: string[] }
+ * @body    { requiredDocuments: string[] | { key:string, showInAllActiveCountries?:boolean, selectedCountries?:string[] }[] }
  */
 const updateGlobalRequiredDocuments = async (req, res) => {
   const incoming = Array.isArray(req.body?.requiredDocuments) ? req.body.requiredDocuments : null;
@@ -1334,11 +1482,18 @@ const updateGlobalRequiredDocuments = async (req, res) => {
     const cleaned = [];
     const seen = new Set();
     for (const raw of incoming) {
-      const key = String(raw ?? '').trim();
+      const key = String(typeof raw === 'string' ? raw : raw?.key ?? '').trim();
       if (!key || seen.has(key)) continue;
       if (!activeKeys.has(key)) continue;
       seen.add(key);
-      cleaned.push(key);
+      cleaned.push({
+        key,
+        showInAllActiveCountries: typeof raw === 'object' && raw ? raw.showInAllActiveCountries !== false : true,
+        selectedCountries:
+          typeof raw === 'object' && raw && Array.isArray(raw.selectedCountries)
+            ? raw.selectedCountries.map((value) => String(value ?? '').trim()).filter(Boolean)
+            : [],
+      });
     }
     settings.globalRequiredDocuments = cleaned;
     await settings.save();
@@ -1347,7 +1502,7 @@ const updateGlobalRequiredDocuments = async (req, res) => {
     // universal update (not just the resolve-at-read merge).
     const result = await Country.updateMany(
       {},
-      { $set: { useGlobalRequiredDocuments: true, requiredDocuments: cleaned } }
+      { $set: { useGlobalRequiredDocuments: true, requiredDocuments: cleaned.map((item) => item.key) } }
     );
     console.log('[control] updateGlobalRequiredDocuments:', {
       count: cleaned.length,
@@ -1355,7 +1510,8 @@ const updateGlobalRequiredDocuments = async (req, res) => {
     });
     res.json({
       success: true,
-      globalRequiredDocuments: cleaned,
+      globalRequiredDocuments: cleaned.map((item) => item.key),
+      globalRequiredDocumentEntries: cleaned,
       matched: result.matchedCount ?? result.n ?? 0,
       modified: result.modifiedCount ?? result.nModified ?? 0,
       message: cleaned.length
@@ -1421,9 +1577,8 @@ const manageCustomDocuments = async (req, res) => {
           } else {
             nextOverrides.push({ key, deleted: true });
           }
-          settings.globalRequiredDocuments = (settings.globalRequiredDocuments || []).filter(
-            (k) => String(k ?? '').trim() !== key
-          );
+          settings.globalRequiredDocuments = sanitizeGlobalRequiredDocumentEntries(settings.globalRequiredDocuments)
+            .filter((entry) => entry.key !== key);
         }
       }
 
@@ -1563,9 +1718,8 @@ const manageCustomDocuments = async (req, res) => {
         (d) => String(d.key ?? '').trim() !== key
       );
     }
-    settings.globalRequiredDocuments = (settings.globalRequiredDocuments || []).filter(
-      (k) => String(k ?? '').trim() !== key
-    );
+    settings.globalRequiredDocuments = sanitizeGlobalRequiredDocumentEntries(settings.globalRequiredDocuments)
+      .filter((entry) => entry.key !== key);
     await settings.save();
     // Strip the deleted key from every per-country requiredDocuments override so
     // applicants don't see stale entries referring to a doc that no longer exists.
@@ -1602,4 +1756,5 @@ module.exports = {
   updateGlobalRequiredDocuments,
   manageCustomDocuments,
   updateCountryDisplayToggles,
+  bulkUpdateCountryVisibility,
 };

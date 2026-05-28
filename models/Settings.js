@@ -143,7 +143,7 @@ const settingsSchema = new mongoose.Schema({
   },
   /** Shown on every destination detail page — "Why book now?" bullets (global default). */
   destinationWhyBookNow: {
-    type: [{ type: String, trim: true }],
+    type: [mongoose.Schema.Types.Mixed],
     default: []
   },
   /** Shown on every destination detail page — "What's included" items (global default). */
@@ -153,6 +153,8 @@ const settingsSchema = new mongoose.Schema({
       description: { type: String, trim: true, default: '' },
       icon: { type: String, trim: true, default: '' },
       color: { type: String, trim: true, default: 'blue' },
+      showInAllActiveCountries: { type: Boolean, default: true },
+      selectedCountries: [{ type: String, trim: true }],
     }],
     default: []
   },
@@ -161,6 +163,8 @@ const settingsSchema = new mongoose.Schema({
     type: [{
       question: { type: String, trim: true, default: '' },
       answer: { type: String, trim: true, default: '' },
+      showInAllActiveCountries: { type: Boolean, default: true },
+      selectedCountries: [{ type: String, trim: true }],
     }],
     default: []
   },
@@ -169,12 +173,14 @@ const settingsSchema = new mongoose.Schema({
     type: [{
       title: { type: String, trim: true, default: '' },
       description: { type: String, trim: true, default: '' },
+      showInAllActiveCountries: { type: Boolean, default: true },
+      selectedCountries: [{ type: String, trim: true }],
     }],
     default: []
   },
   /** Shown on every destination detail page — generic visa requirement bullets (global default). */
   destinationVisaRequirements: {
-    type: [{ type: String, trim: true }],
+    type: [mongoose.Schema.Types.Mixed],
     default: []
   },
   /** Shown on the landing page under the hero search bar as four editable highlight cards. */
@@ -184,6 +190,11 @@ const settingsSchema = new mongoose.Schema({
       body: { type: String, trim: true, default: '' },
     }],
     default: []
+  },
+  /** Shown under the landing page hero search bar as popular tag buttons. */
+  popularCountries: {
+    type: [String],
+    default: ["USA", "UK", "EU Schengen", "Dubai", "Japan"]
   },
 
   /**
@@ -202,6 +213,22 @@ const settingsSchema = new mongoose.Schema({
   globalProcessingDays: { type: String, default: '', trim: true },
   globalBasePrice: { type: Number, default: null },
   globalGovernmentFee: { type: Number, default: null },
+  globalBasePriceVisibility: {
+    applyToAllActiveCountries: { type: Boolean, default: true },
+    selectedCountries: [{ type: String, trim: true }],
+  },
+  globalGovernmentFeeVisibility: {
+    applyToAllActiveCountries: { type: Boolean, default: true },
+    selectedCountries: [{ type: String, trim: true }],
+  },
+  globalEntryTypeVisibility: {
+    applyToAllActiveCountries: { type: Boolean, default: true },
+    selectedCountries: [{ type: String, trim: true }],
+  },
+  globalProcessingDaysVisibility: {
+    applyToAllActiveCountries: { type: Boolean, default: true },
+    selectedCountries: [{ type: String, trim: true }],
+  },
 
   /**
    * Universal "Required Documents" — applied to every country whose
@@ -209,7 +236,7 @@ const settingsSchema = new mongoose.Schema({
    * doc keys; the labels come from the merged catalog (built-in + custom).
    */
   globalRequiredDocuments: {
-    type: [{ type: String, trim: true }],
+    type: [mongoose.Schema.Types.Mixed],
     default: []
   },
 
@@ -258,6 +285,7 @@ const settingsSchema = new mongoose.Schema({
   showRequiredDocuments: { type: Boolean, default: true },
   showVisaRequirements: { type: Boolean, default: true },
   maintenanceModeEnabled: { type: Boolean, default: false },
+  showPopularCountries: { type: Boolean, default: true },
 
   /** Global GST toggles applied to every user payment calculation. */
   gstEnabled: { type: Boolean, default: true },
