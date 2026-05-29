@@ -12,6 +12,26 @@ const uploadedDocumentDetailSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const uploadedDocumentHistoryItemSchema = new mongoose.Schema(
+  {
+    docType: { type: String, default: '' },
+    url: { type: String, default: '' },
+    fileName: { type: String, default: '' },
+    fileSize: { type: Number, default: 0 },
+    mimeType: { type: String, default: '' },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
+const driveLinkHistoryItemSchema = new mongoose.Schema(
+  {
+    url: { type: String, default: '' },
+    updatedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const applicationSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -64,10 +84,12 @@ const applicationSchema = new mongoose.Schema({
       travelerNo: { type: Number, required: true },
       travelerName: { type: String, default: "" },
       gdriveLink: { type: String, default: "" },
+      gdriveLinkHistory: { type: [driveLinkHistoryItemSchema], default: [] },
       /** Optional second folder (e.g. extra reference materials); not used for required-doc completion. */
       gdriveFurtherInfoLink: { type: String, default: "" },
       documents: { type: Map, of: String, default: {} },
       documentDetails: { type: Map, of: uploadedDocumentDetailSchema, default: {} },
+      documentHistory: { type: [uploadedDocumentHistoryItemSchema], default: [] },
       otherDocuments: [{ type: String }],
       uploadedAt: { type: Date, default: Date.now },
     },
@@ -97,6 +119,7 @@ const applicationSchema = new mongoose.Schema({
   detailsPending: { type: Boolean, default: false },
   
   gdriveLink: { type: String, default: "" },
+  gdriveLinkHistory: { type: [driveLinkHistoryItemSchema], default: [] },
   /** Legacy single-traveler optional second Drive link (mirrors travellerDocuments[].gdriveFurtherInfoLink). */
   gdriveFurtherInfoLink: { type: String, default: "" },
 

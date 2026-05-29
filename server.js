@@ -48,6 +48,15 @@ app.use(helmet.crossOriginResourcePolicy({ policy: "cross-origin" }));
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Optional request logger middleware. Keep disabled by default to avoid noisy terminals.
+const requestLoggingEnabled = String(process.env.ENABLE_API_REQUEST_LOGS || "").trim() === "1";
+app.use((req, res, next) => {
+  if (requestLoggingEnabled) {
+    console.log(`[API REQUEST] ${req.method} ${req.originalUrl}`);
+  }
+  next();
+});
+
 // Static uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 

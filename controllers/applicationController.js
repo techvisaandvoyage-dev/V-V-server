@@ -81,6 +81,75 @@ const appendApplicantNotes = (existingValue, incomingValue) => {
   return combined.slice(0, 8000);
 };
 
+const updateDriveLinkWithHistory = (target, nextValue, field = 'gdriveLink', historyField = 'gdriveLinkHistory') => {
+  if (!target) return;
+  const incoming = String(nextValue ?? '').trim();
+  const current = String(target?.[field] ?? '').trim();
+  if (incoming === current) {
+    target[field] = incoming;
+    return;
+  }
+
+  const history = Array.isArray(target?.[historyField])
+    ? target[historyField].map((entry) => ({ ...(entry?.toObject ? entry.toObject() : entry) }))
+    : [];
+
+  if (current) {
+    const alreadyTracked = history.some((entry) => String(entry?.url || '').trim() === current);
+    if (!alreadyTracked) {
+      history.push({
+        url: current,
+        updatedAt: new Date(),
+      });
+    }
+  }
+
+  target[field] = incoming;
+  target[historyField] = history;
+};
+
+const removeTravelerDocumentFromApplication = (application, travelerEntry, docType) => {
+  if (!application || !travelerEntry || !docType) return;
+
+  const documents = travelerEntry.documents || {};
+  const documentDetails = travelerEntry.documentDetails || {};
+  const documentHistory = Array.isArray(travelerEntry.documentHistory)
+    ? travelerEntry.documentHistory.map((entry) => ({ ...(entry?.toObject ? entry.toObject() : entry) }))
+    : [];
+
+  const previousPath =
+    typeof documents.get === 'function'
+      ? documents.get(docType)
+      : documents[docType];
+  const previousDetail =
+    typeof documentDetails.get === 'function'
+      ? documentDetails.get(docType)
+      : documentDetails[docType];
+
+  if (previousPath) {
+    documentHistory.push({
+      docType,
+      url: String(previousDetail?.url || previousPath || '').trim(),
+      fileName: String(previousDetail?.fileName || '').trim(),
+      fileSize: Number(previousDetail?.fileSize || 0),
+      mimeType: String(previousDetail?.mimeType || '').trim(),
+      uploadedAt: previousDetail?.uploadedAt || new Date(),
+    });
+    application.documents = (Array.isArray(application.documents) ? application.documents : [])
+      .filter((storedPath) => String(storedPath || '').trim() !== String(previousPath || '').trim());
+  }
+
+  const nextDocuments = { ...(documents?.toObject ? documents.toObject() : documents) };
+  const nextDocumentDetails = { ...(documentDetails?.toObject ? documentDetails.toObject() : documentDetails) };
+  delete nextDocuments[docType];
+  delete nextDocumentDetails[docType];
+
+  travelerEntry.documents = nextDocuments;
+  travelerEntry.documentDetails = nextDocumentDetails;
+  travelerEntry.documentHistory = documentHistory.filter((entry) => String(entry?.url || '').trim());
+  travelerEntry.uploadedAt = new Date();
+};
+
 const resolveCheckoutPricing = async (countryId, travelerCount = 1) => {
   const country = await Country.findOne({ slug: String(countryId) }).select(
     'requiredDocuments useGlobalRequiredDocuments basePrice useGlobalBasePrice governmentFee useGlobalGovernmentFee useGlobalGst gstEnabled gstRate'
@@ -89,13 +158,25 @@ const resolveCheckoutPricing = async (countryId, travelerCount = 1) => {
   
   const useGlobalRequiredDocuments = country?.useGlobalRequiredDocuments !== false;
   const globalRequiredDocuments = Array.isArray(settings?.globalRequiredDocuments)
-    ? settings.globalRequiredDocuments.map((k) => String(k ?? '').trim()).filter(Boolean)
+    ? settings.globalRequiredDocuments.map((k) => {
+        if (!k) return '';
+        if (typeof k === 'object') {
+          return String(k.key || k.id || '').trim();
+        }
+        return String(k).trim();
+      }).filter(Boolean)
     : [];
     
   const requiredDocuments = useGlobalRequiredDocuments
     ? (globalRequiredDocuments.length ? globalRequiredDocuments : ['passport'])
     : (Array.isArray(country?.requiredDocuments) && country.requiredDocuments.length
-        ? country.requiredDocuments
+        ? country.requiredDocuments.map((k) => {
+            if (!k) return '';
+            if (typeof k === 'object') {
+              return String(k.key || k.id || '').trim();
+            }
+            return String(k).trim();
+          }).filter(Boolean)
         : ['passport']);
 
   const globalBasePrice = Number(settings?.globalBasePrice);
@@ -157,7 +238,7 @@ const serializeApplicationWithPricing = async (application) => {
   if (!application) return application;
 
   const source = typeof application.toObject === 'function'
-    ? application.toObject()
+    ? application.toObject({ flattenMaps: true })
     : { ...application };
 
   try {
@@ -408,16 +489,21 @@ const createCheckoutDraft = async (req, res) => {
  */
 const updateUserApplication = async (req, res) => {
   try {
-    const application = await Application.findOne({
-      _id: req.params.id,
-      user: req.user.id,
-    });
+    const mongoose = require('mongoose');
+    const query = mongoose.Types.ObjectId.isValid(req.params.id)
+      ? { _id: req.params.id, user: req.user.id }
+      : { applicationId: String(req.params.id).trim(), user: req.user.id };
+    const application = await Application.findOne(query);
     if (!application) {
       return res.status(404).json({ success: false, message: 'Application not found' });
     }
 
     const canEditBasic = application.status === 'pending' || application.detailsPending === true;
     const canSaveApplicantNotes =
+      application.status === 'pending' ||
+      application.status === 'review' ||
+      application.detailsPending === true;
+    const canUpdateUploadLinks =
       application.status === 'pending' ||
       application.status === 'review' ||
       application.detailsPending === true;
@@ -429,16 +515,6 @@ const updateUserApplication = async (req, res) => {
         return res.status(403).json({ success: false, message: 'Further information cannot be updated for this application.' });
       }
       updates.applicantNotes = appendApplicantNotes(application.applicantNotes, req.body.applicantNotes);
-    }
-
-    if (!canEditBasic) {
-      if (Object.keys(updates).length === 0) {
-        return res.status(403).json({ success: false, message: 'This application cannot be edited' });
-      }
-      const updated = await Application.findByIdAndUpdate(req.params.id, updates, {
-        returnDocument: 'after',
-      });
-      return res.json({ success: true, application: updated });
     }
 
     const {
@@ -453,42 +529,60 @@ const updateUserApplication = async (req, res) => {
       gdriveLink,
       gdriveFurtherInfoLink,
     } = req.body;
-    if (firstName !== undefined) updates.firstName = String(firstName).trim() || application.firstName;
-    if (lastName !== undefined) updates.lastName = String(lastName).trim() || application.lastName;
-    if (email !== undefined) updates.email = String(email).trim() || application.email;
-    if (passportNo !== undefined) {
-      const p = String(passportNo).trim();
-      updates.passportNo = p || application.passportNo;
-      if (p && p !== 'PENDING_UPLOAD') updates.detailsPending = false;
-    }
-    if (nationality !== undefined) updates.nationality = String(nationality).trim() || application.nationality;
-    if (dob !== undefined && dob) {
-      const d = new Date(dob);
-      if (!Number.isNaN(d.getTime())) updates.dob = d;
-    }
-    if (travelDate !== undefined && travelDate) {
-      const d = new Date(travelDate);
-      if (!Number.isNaN(d.getTime())) updates.travelDate = d;
-    }
-    if (returnDate !== undefined) {
-      if (!returnDate) updates.returnDate = null;
-      else {
-        const d = new Date(returnDate);
-        if (!Number.isNaN(d.getTime())) updates.returnDate = d;
+    if (canEditBasic) {
+      if (firstName !== undefined) updates.firstName = String(firstName).trim() || application.firstName;
+      if (lastName !== undefined) updates.lastName = String(lastName).trim() || application.lastName;
+      if (email !== undefined) updates.email = String(email).trim() || application.email;
+      if (passportNo !== undefined) {
+        const p = String(passportNo).trim();
+        updates.passportNo = p || application.passportNo;
+        if (p && p !== 'PENDING_UPLOAD') updates.detailsPending = false;
+      }
+      if (nationality !== undefined) updates.nationality = String(nationality).trim() || application.nationality;
+      if (dob !== undefined && dob) {
+        const d = new Date(dob);
+        if (!Number.isNaN(d.getTime())) updates.dob = d;
+      }
+      if (travelDate !== undefined && travelDate) {
+        const d = new Date(travelDate);
+        if (!Number.isNaN(d.getTime())) updates.travelDate = d;
+      }
+      if (returnDate !== undefined) {
+        if (!returnDate) updates.returnDate = null;
+        else {
+          const d = new Date(returnDate);
+          if (!Number.isNaN(d.getTime())) updates.returnDate = d;
+        }
       }
     }
     
     if (gdriveLink !== undefined) {
+      if (!canUpdateUploadLinks) {
+        return res.status(403).json({ success: false, message: 'Google Drive link cannot be updated for this application.' });
+      }
       updates.gdriveLink = String(gdriveLink).trim();
-      // Optionally, if they provide a GDrive link, we can consider documents uploaded
-      // but maybe that's best handled by admin. We'll just save it.
+      const currentHistory = Array.isArray(application.gdriveLinkHistory)
+        ? application.gdriveLinkHistory.map((entry) => ({ ...(entry?.toObject ? entry.toObject() : entry) }))
+        : [];
+      const currentLink = String(application.gdriveLink || '').trim();
+      const nextLink = String(gdriveLink || '').trim();
+      if (currentLink && currentLink !== nextLink && !currentHistory.some((entry) => String(entry?.url || '').trim() === currentLink)) {
+        currentHistory.push({ url: currentLink, updatedAt: new Date() });
+      }
+      updates.gdriveLinkHistory = currentHistory;
     }
     if (gdriveFurtherInfoLink !== undefined) {
+      if (!canUpdateUploadLinks) {
+        return res.status(403).json({ success: false, message: 'Further information link cannot be updated for this application.' });
+      }
       updates.gdriveFurtherInfoLink = String(gdriveFurtherInfoLink).trim();
     }
 
     const { travelerUpdate } = req.body;
     if (travelerUpdate) {
+      if (!canUpdateUploadLinks) {
+        return res.status(403).json({ success: false, message: 'Traveler upload details cannot be updated for this application.' });
+      }
       const {
         travelerNo,
         travelerName,
@@ -496,6 +590,7 @@ const updateUserApplication = async (req, res) => {
         gdriveFurtherInfoLink: travelerGdriveFurtherInfoLink,
         otherDocuments: travelerOtherDocuments,
         documents: travelerDocuments,
+        removeDocumentTypes,
       } = travelerUpdate;
       if (Number.isFinite(Number(travelerNo))) {
         const travellers = Array.isArray(application.travellerDocuments) ? [...application.travellerDocuments] : [];
@@ -503,7 +598,9 @@ const updateUserApplication = async (req, res) => {
         
         if (existingIdx >= 0) {
           if (travelerName !== undefined) travellers[existingIdx].travelerName = travelerName;
-          if (travelerGdriveLink !== undefined) travellers[existingIdx].gdriveLink = travelerGdriveLink;
+          if (travelerGdriveLink !== undefined) {
+            updateDriveLinkWithHistory(travellers[existingIdx], travelerGdriveLink, 'gdriveLink', 'gdriveLinkHistory');
+          }
           if (travelerGdriveFurtherInfoLink !== undefined) {
             travellers[existingIdx].gdriveFurtherInfoLink = String(travelerGdriveFurtherInfoLink || '').trim();
           }
@@ -513,18 +610,30 @@ const updateUserApplication = async (req, res) => {
           if (travelerDocuments !== undefined) {
             travellers[existingIdx].documents = travelerDocuments;
           }
+          if (Array.isArray(removeDocumentTypes) && removeDocumentTypes.length) {
+            removeDocumentTypes
+              .map((entry) => String(entry || '').trim())
+              .filter(Boolean)
+              .forEach((docType) => removeTravelerDocumentFromApplication(application, travellers[existingIdx], docType));
+          }
         } else {
           travellers.push({
             travelerNo: Number(travelerNo),
             travelerName: travelerName || '',
             gdriveLink: travelerGdriveLink || '',
+            gdriveLinkHistory: [],
             gdriveFurtherInfoLink: String(travelerGdriveFurtherInfoLink || '').trim(),
             otherDocuments: travelerOtherDocuments || [],
             documents: travelerDocuments || {},
           });
         }
         updates.travellerDocuments = travellers.sort((a, b) => a.travelerNo - b.travelerNo);
+        updates.documents = Array.isArray(application.documents) ? application.documents : [];
       }
+    }
+
+    if (!canEditBasic && Object.keys(updates).length === 0) {
+      return res.status(403).json({ success: false, message: 'This application cannot be edited' });
     }
 
     const updated = await Application.findByIdAndUpdate(req.params.id, updates, {
@@ -550,10 +659,11 @@ const appendApplicationDocuments = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No files saved' });
     }
 
-    const application = await Application.findOne({
-      _id: req.params.id,
-      user: req.user.id,
-    });
+    const mongoose = require('mongoose');
+    const query = mongoose.Types.ObjectId.isValid(req.params.id)
+      ? { _id: req.params.id, user: req.user.id }
+      : { applicationId: String(req.params.id).trim(), user: req.user.id };
+    const application = await Application.findOne(query);
     if (!application) {
       return res.status(404).json({ success: false, message: 'Application not found' });
     }
@@ -577,6 +687,9 @@ const appendApplicationDocuments = async (req, res) => {
       if (!Array.isArray(documentsMeta)) documentsMeta = [];
     } catch (_) {
       documentsMeta = [];
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'gdriveLink')) {
+      updateDriveLinkWithHistory(application, req.body.gdriveLink, 'gdriveLink', 'gdriveLinkHistory');
     }
 
     if (Number.isFinite(travelerNo) && travelerNo > 0 && documentsMeta.length > 0) {
@@ -620,19 +733,36 @@ const appendApplicationDocuments = async (req, res) => {
       if (existingIdx >= 0) {
         payload = { ...travellers[existingIdx].toObject ? travellers[existingIdx].toObject() : travellers[existingIdx] };
         payload.travelerName = travelerName || payload.travelerName;
-        if (gdriveLink) payload.gdriveLink = gdriveLink;
+        if (Object.prototype.hasOwnProperty.call(req.body, 'gdriveLink')) {
+          updateDriveLinkWithHistory(payload, gdriveLink, 'gdriveLink', 'gdriveLinkHistory');
+        }
         if (Object.prototype.hasOwnProperty.call(req.body, 'gdriveFurtherInfoLink')) {
           payload.gdriveFurtherInfoLink = gdriveFurtherInfoLink;
         }
         const previousDocuments = payload.documents || {};
         const previousDocumentDetails = payload.documentDetails || {};
+        const previousDocumentHistory = Array.isArray(payload.documentHistory)
+          ? payload.documentHistory.map((entry) => ({ ...(entry?.toObject ? entry.toObject() : entry) }))
+          : [];
 
         Object.entries(docMap).forEach(([docType, nextPath]) => {
           const previousPath =
             typeof previousDocuments.get === 'function'
               ? previousDocuments.get(docType)
               : previousDocuments[docType];
+          const previousDetail =
+            typeof previousDocumentDetails.get === 'function'
+              ? previousDocumentDetails.get(docType)
+              : previousDocumentDetails[docType];
           if (previousPath && previousPath !== nextPath) {
+            previousDocumentHistory.push({
+              docType,
+              url: String(previousDetail?.url || previousPath || '').trim(),
+              fileName: String(previousDetail?.fileName || '').trim(),
+              fileSize: Number(previousDetail?.fileSize || 0),
+              mimeType: String(previousDetail?.mimeType || '').trim(),
+              uploadedAt: previousDetail?.uploadedAt || new Date(),
+            });
             application.documents = (Array.isArray(application.documents) ? application.documents : [])
               .filter((storedPath) => String(storedPath || '').trim() !== String(previousPath || '').trim());
           }
@@ -640,6 +770,7 @@ const appendApplicationDocuments = async (req, res) => {
 
         payload.documents = { ...(previousDocuments || {}), ...docMap };
         payload.documentDetails = { ...(previousDocumentDetails || {}), ...docDetailsMap };
+        payload.documentHistory = previousDocumentHistory.filter((entry) => String(entry?.url || '').trim());
         const existingOther = Array.isArray(payload.otherDocuments)
           ? payload.otherDocuments.map((p) => String(p || '').trim()).filter(Boolean)
           : [];
@@ -651,9 +782,11 @@ const appendApplicationDocuments = async (req, res) => {
           travelerNo,
           travelerName,
           gdriveLink,
+          gdriveLinkHistory: [],
           gdriveFurtherInfoLink,
           documents: docMap,
           documentDetails: docDetailsMap,
+          documentHistory: [],
           otherDocuments,
           uploadedAt: new Date(),
         };
@@ -716,10 +849,11 @@ const appendApplicationDocuments = async (req, res) => {
  */
 const getUserApplicationById = async (req, res) => {
   try {
-    const application = await Application.findOne({
-      _id: req.params.id,
-      user: req.user.id,
-    });
+    const mongoose = require('mongoose');
+    const query = mongoose.Types.ObjectId.isValid(req.params.id)
+      ? { _id: req.params.id, user: req.user.id }
+      : { applicationId: String(req.params.id).trim(), user: req.user.id };
+    const application = await Application.findOne(query);
     if (!application) {
       return res.status(404).json({ success: false, message: 'Application not found' });
     }
@@ -832,6 +966,21 @@ const getAllApplications = async (req, res) => {
   }
 };
 
+const findApplicationByIdOrSeq = async (id, populateUser = false) => {
+  const mongoose = require('mongoose');
+  let query;
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    query = { _id: id };
+  } else {
+    query = { applicationId: String(id).trim() };
+  }
+  let q = Application.findOne(query);
+  if (populateUser) {
+    q = q.populate('user', 'name email phone age gender');
+  }
+  return q;
+};
+
 /**
  * @route   GET /api/admin/applications/:id
  * @desc    Get specific application details
@@ -839,7 +988,7 @@ const getAllApplications = async (req, res) => {
  */
 const getApplicationById = async (req, res) => {
   try {
-    const application = await Application.findById(req.params.id).populate('user', 'name email phone age gender');
+    const application = await findApplicationByIdOrSeq(req.params.id, true);
     if (!application) {
       return res.status(404).json({ success: false, message: 'Application not found' });
     }
@@ -852,7 +1001,7 @@ const getApplicationById = async (req, res) => {
 
 const updateApplicationByAdmin = async (req, res) => {
   try {
-    const application = await Application.findById(req.params.id);
+    const application = await findApplicationByIdOrSeq(req.params.id);
     if (!application) {
       return res.status(404).json({ success: false, message: 'Application not found' });
     }
@@ -879,7 +1028,9 @@ const updateApplicationByAdmin = async (req, res) => {
 
         if (existingIdx >= 0) {
           if (travelerName !== undefined) travellers[existingIdx].travelerName = travelerName;
-          if (travelerGdriveLink !== undefined) travellers[existingIdx].gdriveLink = travelerGdriveLink;
+          if (travelerGdriveLink !== undefined) {
+            updateDriveLinkWithHistory(travellers[existingIdx], travelerGdriveLink, 'gdriveLink', 'gdriveLinkHistory');
+          }
           if (gdriveFurtherInfoLink !== undefined) {
             travellers[existingIdx].gdriveFurtherInfoLink = String(travelerUpdate.gdriveFurtherInfoLink || '').trim();
           }
@@ -894,6 +1045,7 @@ const updateApplicationByAdmin = async (req, res) => {
             travelerNo: Number(travelerNo),
             travelerName: travelerName || '',
             gdriveLink: travelerGdriveLink || '',
+            gdriveLinkHistory: [],
             gdriveFurtherInfoLink: String(travelerUpdate.gdriveFurtherInfoLink || '').trim(),
             otherDocuments: travelerOtherDocuments || [],
             documents: travelerDocuments || {},
@@ -908,7 +1060,12 @@ const updateApplicationByAdmin = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Nothing to update.' });
     }
 
-    const updated = await Application.findByIdAndUpdate(req.params.id, updates, {
+    const mongoose = require('mongoose');
+    const query = mongoose.Types.ObjectId.isValid(req.params.id)
+      ? { _id: req.params.id }
+      : { applicationId: String(req.params.id).trim() };
+
+    const updated = await Application.findOneAndUpdate(query, updates, {
       returnDocument: 'after',
     });
     res.json({ success: true, application: updated });
@@ -929,7 +1086,7 @@ const uploadApprovedVisaFile = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please upload a visa file' });
     }
 
-    const application = await Application.findById(req.params.id);
+    const application = await findApplicationByIdOrSeq(req.params.id);
     if (!application) {
       return res.status(404).json({ success: false, message: 'Application not found' });
     }
@@ -965,8 +1122,13 @@ const uploadApprovedVisaFile = async (req, res) => {
 const updateApplicationStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const application = await Application.findByIdAndUpdate(
-      req.params.id,
+    const mongoose = require('mongoose');
+    const query = mongoose.Types.ObjectId.isValid(req.params.id)
+      ? { _id: req.params.id }
+      : { applicationId: String(req.params.id).trim() };
+
+    const application = await Application.findOneAndUpdate(
+      query,
       { status },
       { returnDocument: 'after' }
     );
